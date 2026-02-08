@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>NEON GRAVITY: GLOW & DRAGONS</title>
+    <title>NEON GRAVITY: EVOLUTION v3</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap" rel="stylesheet">
     <style>
         body { 
@@ -113,7 +113,7 @@
 </div>
 
 <div id="overlay">
-    <h1 style="color:#0ff; font-size:40px; margin-bottom:40px; text-shadow:0 0 20px #0ff; text-align:center;">NEON GRAVITY<br><span style="font-size:20px;color:#fff;">GLOW & DRAGONS</span></h1>
+    <h1 style="color:#0ff; font-size:40px; margin-bottom:40px; text-shadow:0 0 20px #0ff; text-align:center;">NEON GRAVITY<br><span style="font-size:20px;color:#fff;">EVOLUTION v3</span></h1>
     <div class="menu-btn" id="btn-start">START GAME</div>
     <div class="menu-btn" id="btn-ost">SOUNDTRACK</div>
     <div style="font-size:12px;color:#888;margin-top:20px;">PC: [Z] Bomb<br>MOBILE: Small Button to Bomb</div>
@@ -322,9 +322,11 @@ function startGame() {
     player.x = worldSize/2; 
     player.y = worldSize/2; 
     player.vx=0; player.vy=0; 
-    player.shield=100; player.weaponLevel=1; player.satellites=[]; player.invuln=0;
+    player.shield=100; 
+    player.weaponLevel=2; // START AT LV 2 (2WAY)
+    player.satellites=[]; player.invuln=0;
     
-    ui.score.innerText = "000000"; ui.stage.innerText = "1"; ui.wLv.innerText = "1"; 
+    ui.score.innerText = "000000"; ui.stage.innerText = "1"; ui.wLv.innerText = "2"; 
     ui.shieldBar.style.width = "100%"; ui.shieldBar.classList.remove('shield-critical');
     ui.shieldBar.style.backgroundColor = '#0ff';
     ui.enemyBar.style.width = "100%";
@@ -370,7 +372,6 @@ function update() {
     let mx = input.keys['ArrowLeft']?-1:input.keys['ArrowRight']?1:input.move.x;
     let my = input.keys['ArrowUp']?-1:input.keys['ArrowDown']?1:input.move.y;
     
-    // Normalize speed
     const mag = Math.hypot(mx, my);
     if (mag > 1) { mx /= mag; my /= mag; }
 
@@ -405,7 +406,6 @@ function update() {
         if (w.active) {
             if (w.life > 60 && w.life % 60 === 0 && spawnedCount < enemiesToSpawn) {
                 const r = Math.random();
-                // Adjusted Probabilities: Dragon is common now (20%)
                 if(r < 0.20) spawnEnemy(w.x, w.y, 'dragon');
                 else if(r < 0.40) spawnEnemy(w.x, w.y, 'cube');
                 else if(r < 0.60) spawnEnemy(w.x, w.y, 'tadpole');
@@ -466,13 +466,16 @@ function spawnEnemy(x, y, type) {
     const vx = Math.cos(burstAngle) * burstSpeed;
     const vy = Math.sin(burstAngle) * burstSpeed;
 
+    // Higher Drop Rate for Level Up: 30%
+    const dropType = Math.random() < 0.3 ? 'level' : 'crystal';
+
     if (type === 'dragon') { 
         let e = {x:x, y:y, vx:vx, vy:vy, hp:8, speed:1.0*spd, color:'#f00', type:'dragon', angle:0, segments:[], drop:'invincible', scale:0.9, fireTimer:0};
         for(let i=0; i<16; i++) e.segments.push({x:x, y:y, angle:0});
         enemies.push(e);
         spawnedCount++;
     } else if (type === 'cube') { 
-        let e = {x:x, y:y, vx:vx, vy:vy, hp:2, speed:1.5*spd, color:'#0f0', type:'cube', angle:0, drop:'crystal', scale:0.8, rot:0, rotX:0, rotY:0};
+        let e = {x:x, y:y, vx:vx, vy:vy, hp:2, speed:1.5*spd, color:'#0f0', type:'cube', angle:0, drop:dropType, scale:0.8, rot:0, rotX:0, rotY:0};
         enemies.push(e);
         spawnedCount++;
     } else if (type === 'tadpole') { 
@@ -484,7 +487,7 @@ function spawnEnemy(x, y, type) {
         const form = forms[Math.floor(Math.random()*forms.length)];
         const leader = {
             x: x, y: y, vx: vx, vy: vy, hp: 1, speed: 2.5*spd, color: '#d0f', type: 'triangle', 
-            angle: 0, drop: 'none', scale: 0.7, 
+            angle: 0, drop: dropType, scale: 0.7, 
             isLeader: true, followers: []
         };
         enemies.push(leader);
@@ -492,7 +495,6 @@ function spawnEnemy(x, y, type) {
 
         for(let i=1; i<=4; i++) {
             if(spawnedCount >= enemiesToSpawn) break;
-            
             let offX = 0, offY = 0;
             if(form === 'V') {
                 offX = (i%2===0 ? 1 : -1) * Math.ceil(i/2) * 25;
@@ -500,11 +502,10 @@ function spawnEnemy(x, y, type) {
             } else if (form === 'line') {
                 offX = (i%2===0 ? 1 : -1) * Math.ceil(i/2) * 35;
                 offY = 0;
-            } else { // Circle
+            } else { 
                 const angle = (Math.PI*2 / 5) * i;
                 offX = Math.cos(angle)*35; offY = Math.sin(angle)*35;
             }
-
             let e = {
                 x: x, y: y, vx: vx, vy: vy, hp: 1, speed: 2.5*spd, color: '#d0f', type: 'triangle', 
                 angle: 0, drop: 'none', scale: 0.7, 
@@ -543,11 +544,26 @@ function updateEntities() {
             e.y += (ty - e.y) * 0.1;
             e.angle = e.leader.angle;
         } else {
-            e.vx += (dx/distToPlayer)*speedMult*SPEED_SCALE; e.vy += (dy/distToPlayer)*speedMult*SPEED_SCALE;
-            e.x+=e.vx + Math.cos(e.angle)*e.speed; e.y+=e.vy + Math.sin(e.angle)*e.speed;
-            
-            if(e.type === 'triangle' || e.type === 'dragon' || e.type === 'tadpole') {
-               e.angle = Math.atan2(dy, dx);
+            // Dragon Speed Limit Logic
+            if(e.type === 'dragon') {
+                e.vx += (dx/distToPlayer) * 0.05 * SPEED_SCALE;
+                e.vy += (dy/distToPlayer) * 0.05 * SPEED_SCALE;
+                e.vx *= 0.98; e.vy *= 0.98;
+                
+                // HARD LIMIT
+                const curSpd = Math.hypot(e.vx, e.vy);
+                const maxDragonSpd = 4.0 * SPEED_SCALE;
+                if(curSpd > maxDragonSpd) {
+                    e.vx = (e.vx/curSpd)*maxDragonSpd;
+                    e.vy = (e.vy/curSpd)*maxDragonSpd;
+                }
+            } else {
+                e.vx += (dx/distToPlayer)*speedMult*SPEED_SCALE; e.vy += (dy/distToPlayer)*speedMult*SPEED_SCALE;
+                e.x+=e.vx + Math.cos(e.angle)*e.speed; e.y+=e.vy + Math.sin(e.angle)*e.speed;
+                
+                if(e.type === 'triangle' || e.type === 'tadpole') {
+                   e.angle = Math.atan2(dy, dx);
+                }
             }
         }
 
@@ -576,7 +592,7 @@ function updateEntities() {
         } else if(e.type==='tadpole') {
             e.history.unshift({x:e.x, y:e.y});
             if(e.history.length > 50) e.history.pop(); 
-        } else {
+        } else if(e.type!=='dragon' && !e.leader) {
             e.angle = Math.atan2(e.vy, e.vx);
         }
 
@@ -695,14 +711,11 @@ function draw() {
     });
     ctx.globalAlpha = 1.0;
 
-    // Grid inside Boundary (Enhanced Glow)
+    // Grid inside Boundary
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, worldSize, worldSize); ctx.clip();
     
-    ctx.strokeStyle='rgba(0, 255, 255, 0.4)'; // Increased opacity
-    ctx.lineWidth=1.5; 
-    ctx.shadowBlur=15; // Increased blur for stronger glow
-    ctx.shadowColor='#0ff'; ctx.beginPath(); 
+    ctx.strokeStyle='rgba(0, 255, 255, 0.4)'; ctx.lineWidth=1.5; ctx.shadowBlur=15; ctx.shadowColor='#0ff'; ctx.beginPath(); 
     const viewX = camera.x; const viewY = camera.y;
     const viewW = width; const viewH = height;
     
@@ -780,7 +793,7 @@ function draw() {
 function drawTriangleEnemy(ctx, e) {
     ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(e.angle); ctx.scale(e.scale * G_SCALE, e.scale * G_SCALE);
     ctx.strokeStyle = e.color; ctx.lineWidth = 2;
-    ctx.shadowBlur = 10; ctx.shadowColor = e.color; // Glow
+    ctx.shadowBlur = 10; ctx.shadowColor = e.color; 
     ctx.beginPath(); ctx.moveTo(15,0); ctx.lineTo(-10,10); ctx.lineTo(-10,-10); ctx.closePath();
     ctx.stroke(); ctx.shadowBlur = 0; ctx.restore();
 }
@@ -818,7 +831,6 @@ function drawTadpoleEnemy(ctx, e) {
     
     // Draw Larger Head
     ctx.beginPath(); 
-    // Increased size from (10, 7) to (15, 10)
     ctx.ellipse(8, 0, 15, 10, 0, 0, Math.PI*2); 
     ctx.stroke();
     
