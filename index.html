@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>NEON GEOMETRY: FIXED</title>
+    <title>NEON GEOMETRY: PC/MOBILE FIX</title>
     <style>
         body { 
             margin: 0; background: #000; overflow: hidden; font-family: monospace; color: #fff; 
@@ -18,15 +18,16 @@
             background: rgba(0,0,0,0.85);
             display: flex; flex-direction: column; justify-content: center; align-items: center;
             text-align: center; z-index: 100;
+            cursor: pointer; /* マウスカーソルを表示 */
         }
         h1 { margin: 0; font-size: 8vw; color: #0ff; text-shadow: 0 0 20px #0ff; }
         p { font-size: 4vw; color: #fff; margin-top: 10px; line-height: 1.5; }
         .blink { animation: blink 1s infinite; }
         @keyframes blink { 50% { opacity: 0.5; } }
 
-        /* スティック位置調整 (bottomを80pxに上げて操作しやすく) */
+        /* --- コントローラー (スマホ用) --- */
         .joystick-area {
-            position: absolute; bottom: 80px; 
+            position: absolute; bottom: 100px; 
             width: 120px; height: 120px;
             border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.15);
             display: flex; justify-content: center; align-items: center; pointer-events: none;
@@ -35,24 +36,22 @@
             width: 50px; height: 50px; border-radius: 50%;
             background: rgba(255, 255, 255, 0.4); position: absolute; transform: translate(0, 0);
         }
-
-        /* 左スティック */
         #stick-left { left: 40px; border-color: rgba(0, 255, 255, 0.3); }
-        
-        /* 右スティック */
         #stick-right { right: 40px; border-color: rgba(255, 0, 0, 0.3); }
         #knob-right { background: rgba(255, 100, 100, 0.4); }
 
-        /* BOMBボタン (スティックのさらに上) */
         #launch-btn {
-            position: absolute; bottom: 220px; right: 65px;
+            position: absolute; bottom: 240px; right: 65px;
             width: 70px; height: 70px; border-radius: 50%;
             background: rgba(255, 200, 0, 0.2); border: 2px solid #fd0;
             color: #fd0; font-weight: bold; display: flex; justify-content: center; align-items: center;
             font-size: 14px; z-index: 50; box-shadow: 0 0 10px #fd0;
-            transition: transform 0.1s;
+            transition: transform 0.1s; cursor: pointer;
         }
         #launch-btn:active { background: #fd0; color: #000; transform: scale(0.9); }
+
+        /* PCでのプレイ時はタッチUIを隠すクラス */
+        .pc-mode #controls { display: none !important; }
 
     </style>
 </head>
@@ -62,8 +61,8 @@
 
 <div id="overlay">
     <h1>NEON DRAGON</h1>
-    <p>TAP TO START</p>
-    <p style="color:#f00; font-size: 3.5vw;">DRAGON'S WEAKNESS IS HEAD!</p>
+    <p>CLICK / TAP TO START</p>
+    <p style="color:#f00; font-size: 3.5vw;">PC: ARROWS + SPACE + Z<br>MOBILE: TWIN STICK</p>
 </div>
 
 <div id="controls" style="display:none;">
@@ -80,48 +79,51 @@ const G_SCALE = 0.7;
 const SPEED_SCALE = 0.4; 
 const WALL_MARGIN = 20;
 
-// --- オーディオシステム ---
+// --- オーディオシステム (PC/Mobile互換) ---
 const AudioSys = {
     ctx: null,
     init: function() {
         try {
             const AudioContext = window.AudioContext || window.webkitAudioContext;
-            if (AudioContext) {
-                this.ctx = new AudioContext();
-            }
-        } catch(e) { console.log('Audio init failed'); }
+            if (!AudioContext) return;
+            if (!this.ctx) this.ctx = new AudioContext();
+            if (this.ctx.state === 'suspended') this.ctx.resume();
+        } catch(e) { console.warn('Audio init error', e); }
     },
     play: function(type) {
         if (!this.ctx) return;
-        if (this.ctx.state === 'suspended') this.ctx.resume();
+        // 再生直前にresumeを試みる (重要)
+        if (this.ctx.state === 'suspended') this.ctx.resume().catch(()=>{});
         
-        const t = this.ctx.currentTime;
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        osc.connect(gain); gain.connect(this.ctx.destination);
+        try {
+            const t = this.ctx.currentTime;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.connect(gain); gain.connect(this.ctx.destination);
 
-        if (type === 'shoot') {
-            osc.type = 'triangle'; osc.frequency.setValueAtTime(600, t); osc.frequency.exponentialRampToValueAtTime(100, t+0.1);
-            gain.gain.setValueAtTime(0.05, t); gain.gain.linearRampToValueAtTime(0, t+0.1); osc.start(t); osc.stop(t+0.1);
-        } else if (type === 'powerup') {
-            osc.type = 'square'; osc.frequency.setValueAtTime(400, t); osc.frequency.linearRampToValueAtTime(1200, t+0.3);
-            gain.gain.setValueAtTime(0.1, t); gain.gain.linearRampToValueAtTime(0, t+0.3); osc.start(t); osc.stop(t+0.3);
-        } else if (type === 'bounce') {
-            osc.type = 'sine'; osc.frequency.setValueAtTime(150, t); osc.frequency.exponentialRampToValueAtTime(50, t+0.2);
-            gain.gain.setValueAtTime(0.2, t); gain.gain.linearRampToValueAtTime(0, t+0.2); osc.start(t); osc.stop(t+0.2);
-        } else if (type === 'launch') {
-            osc.type = 'square'; osc.frequency.setValueAtTime(200, t); osc.frequency.linearRampToValueAtTime(800, t+0.5);
-            gain.gain.setValueAtTime(0.2, t); gain.gain.linearRampToValueAtTime(0, t+0.5); osc.start(t); osc.stop(t+0.5);
-        } else if (type === 'explode') {
-            osc.type = 'sawtooth'; osc.frequency.setValueAtTime(100, t); osc.frequency.exponentialRampToValueAtTime(10, t+0.3);
-            gain.gain.setValueAtTime(0.2, t); gain.gain.linearRampToValueAtTime(0, t+0.3); osc.start(t); osc.stop(t+0.3);
-        } else if (type === 'damage') {
-            osc.type = 'sawtooth'; osc.frequency.setValueAtTime(150, t); osc.frequency.linearRampToValueAtTime(50, t+0.2);
-            gain.gain.setValueAtTime(0.3, t); gain.gain.linearRampToValueAtTime(0, t+0.2); osc.start(t); osc.stop(t+0.2);
-        } else if (type === 'deflect') {
-            osc.type = 'square'; osc.frequency.setValueAtTime(800, t); osc.frequency.exponentialRampToValueAtTime(200, t+0.1);
-            gain.gain.setValueAtTime(0.1, t); gain.gain.linearRampToValueAtTime(0, t+0.1); osc.start(t); osc.stop(t+0.1);
-        }
+            if (type === 'shoot') {
+                osc.type = 'triangle'; osc.frequency.setValueAtTime(600, t); osc.frequency.exponentialRampToValueAtTime(100, t+0.1);
+                gain.gain.setValueAtTime(0.05, t); gain.gain.linearRampToValueAtTime(0, t+0.1); osc.start(t); osc.stop(t+0.1);
+            } else if (type === 'powerup') {
+                osc.type = 'square'; osc.frequency.setValueAtTime(400, t); osc.frequency.linearRampToValueAtTime(1200, t+0.3);
+                gain.gain.setValueAtTime(0.1, t); gain.gain.linearRampToValueAtTime(0, t+0.3); osc.start(t); osc.stop(t+0.3);
+            } else if (type === 'bounce') {
+                osc.type = 'sine'; osc.frequency.setValueAtTime(150, t); osc.frequency.exponentialRampToValueAtTime(50, t+0.2);
+                gain.gain.setValueAtTime(0.2, t); gain.gain.linearRampToValueAtTime(0, t+0.2); osc.start(t); osc.stop(t+0.2);
+            } else if (type === 'launch') {
+                osc.type = 'square'; osc.frequency.setValueAtTime(200, t); osc.frequency.linearRampToValueAtTime(800, t+0.5);
+                gain.gain.setValueAtTime(0.2, t); gain.gain.linearRampToValueAtTime(0, t+0.5); osc.start(t); osc.stop(t+0.5);
+            } else if (type === 'explode') {
+                osc.type = 'sawtooth'; osc.frequency.setValueAtTime(100, t); osc.frequency.exponentialRampToValueAtTime(10, t+0.3);
+                gain.gain.setValueAtTime(0.2, t); gain.gain.linearRampToValueAtTime(0, t+0.3); osc.start(t); osc.stop(t+0.3);
+            } else if (type === 'damage') {
+                osc.type = 'sawtooth'; osc.frequency.setValueAtTime(150, t); osc.frequency.linearRampToValueAtTime(50, t+0.2);
+                gain.gain.setValueAtTime(0.3, t); gain.gain.linearRampToValueAtTime(0, t+0.2); osc.start(t); osc.stop(t+0.2);
+            } else if (type === 'deflect') {
+                osc.type = 'square'; osc.frequency.setValueAtTime(800, t); osc.frequency.exponentialRampToValueAtTime(200, t+0.1);
+                gain.gain.setValueAtTime(0.1, t); gain.gain.linearRampToValueAtTime(0, t+0.1); osc.start(t); osc.stop(t+0.1);
+            }
+        } catch(e) {}
     }
 };
 
@@ -143,6 +145,7 @@ let width, height;
 let gameState = 'START';
 let score = 0;
 let frame = 0;
+let isMobile = false; // 端末判定フラグ
 
 // Player
 const player = { 
@@ -210,16 +213,33 @@ function init() {
     initGrid();
 }
 
-function startGame() {
-    AudioSys.init();
+// スタート処理（イベントハンドラから呼ばれる）
+function handleStart() {
+    if (gameState === 'PLAYING') return;
+    
+    // UI更新
+    gameState = 'PLAYING';
+    overlay.style.display = 'none';
+    
+    // スマホかPCか判定してコントローラー表示切替
+    isMobile = 'ontouchstart' in window;
+    if (isMobile) {
+        controlsDiv.style.display = 'block';
+    } else {
+        controlsDiv.style.display = 'none'; // PCなら隠す
+        document.body.classList.add('pc-mode');
+    }
+
+    // ゲームリセット
     score = 0; scoreEl.innerText = score;
     bullets=[]; enemies=[]; particles=[]; crystals=[]; missiles=[]; powerups=[]; player.satellites=[];
     player.x=width/2; player.y=height/2; player.vx=0; player.vy=0;
     player.shield = player.maxShield;
     player.weaponLevel = 1;
     wLvEl.innerText = "1"; satCountEl.innerText = "0";
-    gameState = 'PLAYING';
-    overlay.style.display='none'; controlsDiv.style.display='block';
+
+    // サウンド初期化
+    AudioSys.init();
 }
 
 function launchSatellites() {
@@ -306,10 +326,11 @@ function update() {
     if((shooting || keys['Space']) && frame % fireRate === 0) fireBullet();
     if(keys['KeyZ']) { launchSatellites(); keys['KeyZ']=false; }
 
-    // Satellites Radius increased (65 + wave)
+    // Satellites
     player.satellites.forEach((s, i) => {
         s.angle += 0.05 * SPEED_SCALE;
-        const radius = (65 + Math.sin(frame*0.05)*10) * G_SCALE;
+        // 半径拡大
+        const radius = (85 + Math.sin(frame*0.05)*10) * G_SCALE;
         const offset = (Math.PI*2 / player.satellites.length) * i;
         s.x = player.x + Math.cos(s.angle + offset) * radius;
         s.y = player.y + Math.sin(s.angle + offset) * radius;
@@ -667,16 +688,30 @@ function handleTouch(e) {
 
 launchBtn.addEventListener('touchstart', (e)=>{ e.preventDefault(); launchSatellites(); });
 
-window.addEventListener('keydown', e=>keys[e.code]=true);
+// PC Support
+window.addEventListener('keydown', e=>{
+    keys[e.code]=true;
+    if(e.code==='Space' && gameState!=='PLAYING') handleStart();
+});
 window.addEventListener('keyup', e=>keys[e.code]=false);
+
+// Mobile Support (Universal Start Handler)
+const startHandler = (e) => {
+    if(gameState!=='PLAYING') {
+        e.preventDefault();
+        handleStart();
+    }
+};
+overlay.addEventListener('touchstart', startHandler);
+overlay.addEventListener('click', startHandler);
+
 window.addEventListener('touchstart', e=>{
     if(e.target===launchBtn) return;
     if(gameState==='PLAYING')handleTouch(e);
 }, {passive:false});
 window.addEventListener('touchmove', e=>{if(gameState==='PLAYING')handleTouch(e);}, {passive:false});
 window.addEventListener('touchend', e=>{if(gameState==='PLAYING')handleTouch(e);}, {passive:false});
-overlay.addEventListener('touchstart', e=>{e.preventDefault(); if(gameState!=='PLAYING') startGame();});
-overlay.addEventListener('click', ()=>{if(gameState!=='PLAYING') startGame();});
+
 window.addEventListener('resize', init);
 init(); draw();
 </script>
