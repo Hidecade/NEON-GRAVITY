@@ -51,7 +51,7 @@
 このゲームは静的なHTMLファイルのみで動作します。特別なビルド手順は不要です。
 
 1.  リポジトリをクローンまたはダウンロードします。
-2.  `[index.html](https://hidecade.github.io/NEON-GRAVITY/)` をブラウザで開くだけでプレイ可能です。
+2.  https://hidecade.github.io/NEON-GRAVITY/
 
 ## 📄 License
 
