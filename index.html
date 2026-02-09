@@ -330,7 +330,7 @@
         const BULLET_SETTINGS = {
             PLAYER_SPEED: 32.0,  // 自機の弾速
             PLAYER_LIFE: 120,   // 自機の弾の射程(フレーム数)
-            ENEMY_SPEED: 6.0,   // 敵の弾速
+            ENEMY_SPEED: 10.0,   // 敵の弾速
             ENEMY_LIFE: 200    // 敵の弾の射程(フレーム数)
         };
 
@@ -613,14 +613,16 @@
             if ((input.aim.active || input.keys['Space'] || input.keys['KeyZ']) && frame % fireInterval === 0) fire();
 
             // Wormholes Logic
-            if (spawnedCount < enemiesToSpawn && wormholes.filter(w => w.active).length < (1 + Math.floor(stage / 2)) && Math.random() < 0.02) {
+            const maxWormholes = 3 + stage;
+
+            if (spawnedCount < enemiesToSpawn && wormholes.filter(w => w.active).length < maxWormholes && Math.random() < 0.03) {
                 spawnWormhole();
             }
 
             wormholes.forEach((w) => {
                 w.life--;
                 if (w.active) {
-                    if (w.life > 60 && w.life % 60 === 0 && spawnedCount < enemiesToSpawn) {
+                    if (w.life > 60 && w.life % 180 === 0 && spawnedCount < enemiesToSpawn) {
                         const r = Math.random();
                         if (r < 0.20) spawnEnemy(w.x, w.y, 'dragon');
                         else if (r < 0.40) spawnEnemy(w.x, w.y, 'cube');
@@ -750,10 +752,13 @@
                 const forms = ['V', 'line', 'circle'];
                 const form = forms[Math.floor(Math.random() * forms.length)];
 
+                // リーダーの初期角度を移動方向から決定
+                const initialAngle = Math.atan2(vy, vx);
+
                 const leader = {
                     x: x, y: y, vx: vx, vy: vy, hp: 1,
                     speed: ENEMY_SPEEDS.TRIANGLE * spd,
-                    color: '#d0f', type: 'triangle', angle: Math.atan2(vy, vx), // 出現時の向きを固定
+                    color: '#d0f', type: 'triangle', angle: initialAngle,
                     drop: dropType, scale: 0.7,
                     isLeader: true, followers: [],
                     rotX: Math.random() * Math.PI,
@@ -766,31 +771,34 @@
                 for (let i = 1; i <= 4; i++) {
                     if (spawnedCount >= enemiesToSpawn) break;
 
-                    let offX = 0, offY = 0;
+                    let baseOffX = 0, baseOffY = 0;
 
+                    // リーダーが「右(角度0)」を向いていると仮定した時の配置
                     if (form === 'V') {
-                        // V字の幅と深さを定義
-                        const spreadX = 40; // 左右の間隔
-                        const depthY = -35; // 後方への下がり具合
-
-                        offX = (i % 2 === 0 ? 1 : -1) * Math.ceil(i / 2) * spreadX;
-                        offY = Math.ceil(i / 2) * depthY;
+                        const spreadX = 20; // 左右の広がり
+                        const depthY = -30; // 後方への下がり
+                        baseOffX = Math.ceil(i / 2) * depthY; // リーダーの後ろへ
+                        baseOffY = (i % 2 === 0 ? 1 : -1) * Math.ceil(i / 2) * spreadX; // 左右に展開
                     } else if (form === 'line') {
-                        offX = (i % 2 === 0 ? 1 : -1) * Math.ceil(i / 2) * 45;
-                        offY = 0;
+                        baseOffX = -Math.ceil(i / 2) * 45; // 真後ろに一列
+                        baseOffY = 0;
                     } else { // circle
                         const angle = (Math.PI * 2 / 5) * i;
-                        offX = Math.cos(angle) * 40;
-                        offY = Math.sin(angle) * 40;
+                        baseOffX = Math.cos(angle) * 40;
+                        baseOffY = Math.sin(angle) * 40;
                     }
 
+                    // 【重要】リーダーの初期角度に合わせてオフセット座標を回転させる
+                    const rotatedOffX = baseOffX * Math.cos(initialAngle) - baseOffY * Math.sin(initialAngle);
+                    const rotatedOffY = baseOffX * Math.sin(initialAngle) + baseOffY * Math.cos(initialAngle);
+
                     let e = {
-                        x: x + offX, y: y + offY, vx: vx, vy: vy, hp: 1,
+                        x: x + rotatedOffX, y: y + rotatedOffY, vx: vx, vy: vy, hp: 1,
                         speed: ENEMY_SPEEDS.TRIANGLE * spd,
                         color: '#d0f', type: 'triangle',
-                        angle: leader.angle, drop: 'none', scale: 0.7,
+                        angle: initialAngle, drop: 'none', scale: 0.7,
                         leader: leader,
-                        formOffset: { x: offX, y: offY },
+                        formOffset: { x: baseOffX, y: baseOffY }, // 回転前の基本オフセットを保存
                         rotX: Math.random() * Math.PI,
                         rotY: Math.random() * Math.PI,
                         rotZ: Math.random() * Math.PI
@@ -1049,11 +1057,34 @@
         }
 
         function checkPlayerCollision(e) {
+
             const dist = Math.hypot(player.x - e.x, player.y - e.y);
-            if (dist < 25 && player.invuln <= 0) {
-                player.shield -= 15;
-                player.invuln = 60;
-                if (e.type !== 'dragon') e.hp = 0; // ドラゴン以外は体当たりで消滅
+            // サイズに応じた当たり判定
+            const collisionDist = (e.type === 'tadpole') ? (40 * (e.scale / 0.6)) : 25;
+
+            if (dist < collisionDist) {
+                // 無敵時間中でも、接触している間はシールドを削り続ける
+                // 1フレームごとに 0.5 削る（1秒で30ダメージ相当の持続ダメージ）
+                player.shield -= 0.5;
+
+                // もし無敵時間外であれば、大きな衝撃ダメージ
+                if (player.invuln <= 0) {
+                    player.shield -= 10;
+                    player.invuln = 10; // 連続ヒットのノイズを防ぐための極短無敵
+                    createExplosion(player.x, player.y, '#f00', 5);
+                    AudioSys.playSE('damage');
+                }
+
+                // ドラゴン以外は体当たりで消滅（これも即死させたければ残す）
+                if (e.type !== 'dragon' && player.shield > 0) {
+                    // e.hp = 0; // 敵を消したくない場合はここをコメントアウト
+                }
+
+                // UIの更新と死亡判定
+                ui.shieldBar.style.width = Math.max(0, player.shield) + "%";
+                if (player.shield <= 0) {
+                    damage(0); // 盾が尽きたら死亡処理を呼ぶ
+                }
             }
         }
 
@@ -1076,24 +1107,14 @@
          */
         function updateEnemyBullets() {
             enemyBullets.forEach(eb => {
-                // 1. 移動：速度(vx, vy)を座標に加算
-                eb.x += eb.vx;
-                eb.y += eb.vy;
+                eb.x += eb.vx; eb.y += eb.vy; eb.life--;
 
-                // 2. 寿命を減らす
-                eb.life--;
-
-                // 3. プレイヤーとの当たり判定
-                // player.invuln(無敵時間)が0以下の時のみ判定
                 if (Math.hypot(player.x - eb.x, player.y - eb.y) < 15 && player.invuln <= 0) {
-                    damage(15);      // ダメージ関数を呼ぶ（シールドを減らす）
-                    eb.life = 0;     // 弾を消滅させる
-                    // プレイヤーの位置に赤い火花を出す
+                    eb.life = 0;
                     createExplosion(player.x, player.y, '#f00', 10);
+                    damage(15); // この中で shield <= 0 の判定を行っていることを確認
                 }
             });
-
-            // 4. 寿命が尽きた弾を配列から削除
             enemyBullets = enemyBullets.filter(eb => eb.life > 0);
         }
 
@@ -1202,14 +1223,53 @@
         }
 
         function damage(v) {
-            player.shield -= v; player.invuln = 60;
+            player.shield -= v;
+            player.invuln = 5;
+
             ui.shieldBar.style.width = Math.max(0, player.shield) + "%";
-            AudioSys.playSE('damage'); distortGrid(player.x, player.y, 50, 100);
+            AudioSys.playSE('damage');
+            distortGrid(player.x, player.y, 50, 100);
+
             if (player.shield <= 0) {
-                gameState = 'GAMEOVER'; ui.overlay.style.display = 'flex';
-                ui.overlay.innerHTML = `<h1>GAME OVER</h1><p>SCORE: ${score}</p><div class="menu-btn" onclick="location.reload()">RETRY</div>`;
-                ui.controls.style.display = 'none';
+                gameState = 'GAMEOVER';
                 AudioSys.stopBGM();
+
+                // UIを隠してオーバーレイを表示
+                ui.controls.style.display = 'none';
+                ui.overlay.style.display = 'flex';
+
+                // --- 修正箇所: innerHTMLで書き換えず、要素を操作する ---
+
+                // 1. タイトルとスコアの更新
+                const titleEl = ui.overlay.querySelector('h1');
+                // H1タグがない場合のフォールバック（念の為）
+                if (titleEl) {
+                    titleEl.innerHTML = `GAME OVER<br><span style="font-size:20px;color:#f00;">SCORE: ${score}</span>`;
+                    titleEl.style.color = '#f00';
+                    titleEl.style.textShadow = '0 0 20px #f00';
+                }
+
+                // 2. STARTボタンを「RETRY」ボタンに改造
+                const startBtn = document.getElementById('btn-start');
+                if (startBtn) {
+                    startBtn.innerText = 'RETRY';
+                    startBtn.style.borderColor = '#f00';
+                    startBtn.style.color = '#f00';
+
+                    // ソフトリセットを実行する関数をバインド
+                    const doRetry = (e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        resetGame(); // これを呼ぶ！
+                    };
+
+                    startBtn.onclick = doRetry;
+                    startBtn.ontouchstart = doRetry;
+                }
+
+                // 3. 不要なボタン（SOUNDTRACKなど）を隠す
+                const ostBtn = document.getElementById('btn-ost');
+                if (ostBtn) ostBtn.style.display = 'none';
             }
         }
 
@@ -1256,16 +1316,49 @@
             ctx.strokeStyle = '#0ff'; ctx.lineWidth = 3; ctx.strokeRect(WALL_MARGIN, WALL_MARGIN, worldSize - WALL_MARGIN * 2, worldSize - WALL_MARGIN * 2);
 
             // Wormholes (既存)
+            // Wormholes (漆黒の鏡面球体版)
             wormholes.forEach(w => {
                 if (w.active || w.life > -60) {
                     let scale = 1;
                     if (w.life > 300) scale = (400 - w.life) / 100;
                     else if (w.life <= 0) scale = Math.max(0, (60 + w.life) / 60);
 
-                    ctx.save(); ctx.translate(w.x, w.y); ctx.scale(scale, scale);
-                    ctx.shadowBlur = 20; ctx.shadowColor = '#fff';
-                    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0, 0, 15 + Math.sin(frame * 0.2) * 5, 0, Math.PI * 2); ctx.fill();
-                    ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.beginPath(); ctx.arc(0, 0, 30 + Math.sin(frame * 0.1) * 10, 0, Math.PI * 2); ctx.stroke();
+                    ctx.save();
+                    ctx.translate(w.x, w.y);
+                    ctx.scale(scale, scale);
+
+                    // 1. 背後の空間の歪み（ぼんやりした暗い紫の影）
+                    ctx.shadowBlur = 30;
+                    ctx.shadowColor = '#20f'; // わずかに紫を感じる影
+
+                    // 2. 球体本体のグラデーション（鏡面・金属的な質感をシミュレート）
+                    // 中心を真っ黒、エッジを鋭い青白にすることで鏡面感を出す
+                    const grad = ctx.createRadialGradient(-5, -5, 2, 0, 0, 25);
+                    grad.addColorStop(0, '#333');   // 左上の映り込みハイライト
+                    grad.addColorStop(0.2, '#000'); // 深い黒
+                    grad.addColorStop(0.8, '#000'); // 外縁に向かって黒を維持
+                    grad.addColorStop(1, '#0ff');   // 鋭いエッジ（イベントホライゾン）
+
+                    ctx.fillStyle = grad;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, 20 + Math.sin(frame * 0.1) * 2, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // 3. 周囲を回るリング（吸い込まれる粒子感を表現）
+                    ctx.strokeStyle = 'rgba(0, 255, 255, 0.3)';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, 35 + Math.cos(frame * 0.05) * 5, 0, Math.PI * 2);
+                    ctx.stroke();
+
+                    // 4. 球体表面の光の筋（レンズフレア的な輝き）
+                    ctx.globalCompositeOperation = 'lighter';
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+                    ctx.beginPath();
+                    ctx.moveTo(-15, -15);
+                    ctx.lineTo(5, 5);
+                    ctx.stroke();
+
                     ctx.restore();
                 }
             });
@@ -1278,7 +1371,45 @@
                 else if (e.type === 'tadpole') drawTadpoleEnemy(ctx, e);
             });
 
-            ctx.fillStyle = '#aaf'; enemyBullets.forEach(eb => { ctx.beginPath(); ctx.arc(eb.x, eb.y, 4 * G_SCALE, 0, Math.PI * 2); ctx.fill(); });
+            // --- 敵の弾（回転する点滅ひし形への差し替え） ---
+            enemyBullets.forEach(eb => {
+                ctx.save();
+                ctx.translate(eb.x, eb.y);
+
+                // 回転アニメーション
+                ctx.rotate(frame * 0.15);
+
+                // 赤（#f00）と橙（#f80）を高速点滅（5フレームごと）
+                const bulletColor = (Math.floor(frame / 5) % 2 === 0) ? '#ff0000' : '#ff8800';
+                ctx.fillStyle = bulletColor;
+
+                // ネオンのような発光
+                ctx.shadowBlur = 8;
+                ctx.shadowColor = bulletColor;
+
+                // ひし形を描画
+                const size = 6 * G_SCALE;
+                ctx.beginPath();
+                ctx.moveTo(0, -size);      // 上
+                ctx.lineTo(size * 0.7, 0); // 右
+                ctx.lineTo(0, size);       // 下
+                ctx.lineTo(-size * 0.7, 0);// 左
+                ctx.closePath();
+                ctx.fill();
+
+                // 中心に白い芯を描画して輝きを強調
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.moveTo(0, -size * 0.4);
+                ctx.lineTo(size * 0.3, 0);
+                ctx.lineTo(0, size * 0.4);
+                ctx.lineTo(-size * 0.3, 0);
+                ctx.closePath();
+                ctx.fill();
+
+                ctx.restore();
+            });
+            ctx.shadowBlur = 0; // 他の描画に影響が出ないようリセット
 
             // Player (修正: レーザー中は色を変える)
             if (gameState === 'PLAYING') {
@@ -1658,19 +1789,113 @@
         document.getElementById('btn-back').onclick = closeOST;
 
         window.addEventListener('keydown', e => {
-            if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+            // スクロールなどのブラウザデフォルト動作を防止
+            if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyZ', 'KeyX'].includes(e.code)) e.preventDefault();
+
             input.keys[e.code] = true;
+
+            // タイトル画面でSpaceキーを押すとゲーム開始
             if (gameState === 'TITLE' && e.code === 'Space') startGame();
-            if (gameState === 'PLAYING' && e.code === 'KeyZ') launchSatellites();
+
+            // プレイ中、Xキーでボム（サテライト射出）を実行
+            if (gameState === 'PLAYING' && e.code === 'KeyX') launchSatellites();
+
+            // プレイ中、Zキーを「ボム」のままにしたい場合は以下の通り（あなたの元のコード通り）
+            // if (gameState === 'PLAYING' && e.code === 'KeyZ') launchSatellites();
         });
         window.addEventListener('keyup', e => input.keys[e.code] = false);
 
-        document.body.addEventListener('click', () => { AudioSys.resume(); if (gameState === 'TITLE' && !AudioSys.currentSrc) AudioSys.playBGM('title'); }, { once: true });
+
+        // ユーザーの最初の操作でオーディオを有効化する関数
+        const handleInteraction = () => {
+            AudioSys.resume();
+            if (gameState === 'TITLE' && !AudioSys.currentSrc) {
+                AudioSys.playBGM('title');
+            }
+            // 一度実行されたらイベントを解除
+            document.removeEventListener('click', handleInteraction);
+            document.removeEventListener('touchstart', handleInteraction);
+            document.removeEventListener('keydown', handleInteraction);
+        };
+
+        document.addEventListener('click', handleInteraction);
+        document.addEventListener('touchstart', handleInteraction);
+        document.addEventListener('keydown', handleInteraction);
+
+        function resetGame() {
+            // ゲームの状態変数を初期化
+            score = 0;
+            stage = 1;
+            frame = 0;
+            spawnedCount = 0;
+            enemiesToSpawn = 0;
+            isStageClear = false;
+            killCount = 0;
+
+            // エンティティの配列を空にする
+            bullets = [];
+            lasers = [];
+            enemies = [];
+            enemyBullets = [];
+            particles = [];
+            crystals = [];
+            missiles = [];
+            powerups = [];
+            wormholes = [];
+            scorePopups = [];
+            rings = [];
+
+            // プレイヤーの状態をリセット
+            player.x = worldSize / 2;
+            player.y = worldSize / 2;
+            player.vx = 0;
+            player.vy = 0;
+            player.shield = 100;
+            player.weaponLevel = 2; // 初期武器レベル
+            player.invuln = 0;
+            player.laserTimer = 0;
+            player.satellites = [];
+
+            // UIのリセット
+            ui.score.innerText = "000000";
+            ui.stage.innerText = "1";
+            ui.wLv.innerText = "2";
+            ui.shieldBar.style.width = "100%";
+            ui.shieldBar.classList.remove('shield-critical');
+            ui.shieldBar.style.backgroundColor = '#0ff';
+            ui.enemyBar.style.width = "100%";
+            ui.warn.style.display = 'none';
+            ui.msg.style.display = 'none';
+
+            // ゲームオーバー画面を隠す（リロードしないので重要）
+            ui.overlay.style.display = 'none';
+            ui.controls.style.display = 'block';
+
+            // UI上のボタン等を元の状態に戻す
+            const titleEl = ui.overlay.querySelector('h1');
+            if (titleEl) {
+                titleEl.innerHTML = `NEON GRAVITY<br><span style="font-size:20px;color:#fff;">DEBUGGED</span>`;
+                titleEl.style.color = '#0ff';
+                titleEl.style.textShadow = '0 0 20px #0ff';
+            }
+            const startBtn = document.getElementById('btn-start');
+            if (startBtn) {
+                startBtn.innerText = 'START GAME';
+                startBtn.style.borderColor = '#0ff';
+                startBtn.style.color = '#0ff';
+                // イベントリスナーは startGame 内で再設定されるか、このまま startGame を呼ぶ
+            }
+            const ostBtn = document.getElementById('btn-ost');
+            if (ostBtn) ostBtn.style.display = 'block';
+
+            // ゲーム開始
+            startGame();
+        }
 
         function init() {
             resize();
             AudioSys.init();
-            AudioSys.playBGM('title');
+            // 最初からBGMを鳴らそうとせず、handleInteractionに任せる
         }
 
         init();
