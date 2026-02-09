@@ -26,7 +26,6 @@
             z-index: 1;
         }
 
-        /* UI Layer */
         #ui {
             position: absolute;
             top: 0;
@@ -168,7 +167,7 @@
             border: 2px solid #0ff;
             color: #0ff;
             padding: 20px 50px;
-            margin: 15px;
+            margin: 10px;
             font-size: 22px;
             font-family: 'Orbitron';
             cursor: pointer;
@@ -301,6 +300,7 @@
         <h1 style="color:#0ff; font-size:40px; margin-bottom:40px; text-shadow:0 0 20px #0ff; text-align:center;">NEON GRAVITY<br><span style="font-size:20px;color:#fff;">ORBITAL</span></h1>
         <div class="menu-btn" id="btn-start">START GAME</div>
         <div class="menu-btn" id="btn-ost">SOUNDTRACK</div>
+        <div class="menu-btn" id="btn-title" style="display:none;">TITLE</div>
         <div style="font-size:12px;color:#888;margin-top:20px;">PC: [X] Bomb<br>MOBILE: Small Button to Bomb</div>
     </div>
 
@@ -324,48 +324,50 @@
     <canvas id="game"></canvas>
 
     <script>
-        // --- 基本設定 (Settings) ---
-        const G_SCALE = 0.7;             // グラフィック全体の大きさの倍率
-        const SPEED_SCALE = 0.25;        // 全体の移動速度の基準値
-        const WALL_MARGIN = 5;           // 画面端の移動制限エリアの幅
-        const MAX_WEAPON_LEVEL = 5;      // 武器の最大レベル（弾の数など）
-        const GRID_SPACING = 30;         // 背景グリッド線の間隔
+        // --- 設定と定数 (編集して難易度や見た目を調整できます) ---
 
-        // --- 難易度・出現バランスの設定 (New) ---
+        // グラフィック・基本挙動
+        const G_SCALE = 0.7;             // 全体の描画サイズ倍率 (0.5で半分、1.0で最大)
+        const SPEED_SCALE = 0.25;        // ゲーム全体の移動速度の基準値
+        const WALL_MARGIN = 5;           // ステージ端の見えない壁の厚み
+        const MAX_WEAPON_LEVEL = 5;      // ショットの最大レベル (レベルが高いほど弾数が増える)
+        const GRID_SPACING = 30;         // 背景グリッド線の密度 (小さいほど網目が細かくなる)
+
+        // 敵機の速度
+        const ENEMY_SPEEDS = {
+            TRIANGLE: 4.8,               // 紫：主力機の最高速度
+            CUBE: 2.5,                   // 緑：アイテム持ちの最高速度
+            TADPOLE: 6,                  // 白：精子型の最高速度
+            DRAGON: 8                    // 赤：ボスの最高移動速度
+        };
+        const DRAGON_ACCELERATION = 0.2; // ボスがプレイヤーを追いかける時の加速の強さ
+
+        // エフェクト演出
+        const EXPLOSION_SPEED_MAG = 2.0; // 敵撃破時の火花の飛散速度 (大きいほど勢いが増す)
+        const EXPLOSION_COUNT_MAG = 1.5; // 敵撃破時の火花の量 (大きくすると豪華になりますが重くなる可能性あり)
+
+        // 弾の設定
+        const BULLET_SETTINGS = {
+            PLAYER_SPEED: 32.0,          // 自機の通常弾のスピード
+            PLAYER_LIFE: 120,            // 自機の弾が消えるまでの時間 (実質的な射程距離)
+            ENEMY_SPEED: 10.0,           // 敵が撃ってくる弾のスピード
+            ENEMY_LIFE: 200              // 敵の弾の射程
+        };
+
+        // 敵の出現バランス (難易度に直結)
         const SPAWN_SETTINGS = {
             BASE_ENEMIES: 60,            // ステージ1の敵の総数
             ENEMIES_PER_STAGE: 15,       // ステージが進むごとに追加される敵の数
-            MAX_WORMHOLES_BASE: 5,       // 同時に存在するワームホールの基本数
-            SPAWN_INTERVAL: 180,         // 敵が湧く間隔 (フレーム数。180=約3秒に1回)
-            WORMHOLE_CHANCE: 0.03        // 新しいワームホールが発生する確率 (毎フレーム判定)
+            MAX_WORMHOLES_BASE: 5,       // 画面内に同時に存在する敵の湧き穴の数
+            SPAWN_INTERVAL: 180,         // 湧き穴から敵が出る間隔 (フレーム数。60=1秒)
+            WORMHOLE_CHANCE: 0.03        // 新しい湧き穴が画面内に発生する確率 (毎フレーム判定)
         };
 
-        // --- 敵キャラクターの設定 (Constants) ---
-        const ENEMY_SPEEDS = {
-            TRIANGLE: 4.8,               // 紫色の敵（主力機）の最高速度
-            CUBE: 2.5,                   // 緑色の敵（アイテム持ち）の最高速度
-            TADPOLE: 6,                  // 白色の敵（精子型）の最高速度
-            DRAGON: 8                    // 赤色の敵（ボス）の最高速度
-        };
-        const DRAGON_ACCELERATION = 0.2; // ドラゴンがプレイヤーを追う時の加速の強さ
+        // アイテム・特殊武器
+        const LASER_DURATION = 600;      // レーザーを取得した時の持続時間 (600=10秒間)
+        const ITEM_LIFE = 240;           // 出現したアイテムが消えるまでの時間 (約4秒)
 
-        // --- エフェクトの設定 ---
-        const EXPLOSION_SPEED_MAG = 2.0; // 敵を倒した時の火花の飛散速度（大きいほど派手）
-        const EXPLOSION_COUNT_MAG = 1.5; // 敵を倒した時の火花の量（大きいほど派手）
-
-        // --- 弾・レーザーの設定 ---
-        const BULLET_SETTINGS = {
-            PLAYER_SPEED: 32.0,          // プレイヤーの弾速
-            PLAYER_LIFE: 120,            // プレイヤーの弾が消えるまでの時間（射程距離に影響）
-            ENEMY_SPEED: 10.0,           // 敵の弾速
-            ENEMY_LIFE: 200              // 敵の弾が消えるまでの時間
-        };
-        const LASER_DURATION = 600;      // レーザーアイテムの持続時間 (60fpsで10秒間)
-
-        // --- アイテムの設定 ---
-        const ITEM_LIFE = 240;           // アイテムが消滅するまでの寿命 (240フレーム=約4秒)
-
-        // --- DOM References ---
+        // --- Global Variables ---
         const canvas = document.getElementById('game');
         const ctx = canvas.getContext('2d');
         const ui = {
@@ -384,25 +386,25 @@
             knobL: document.getElementById('knob-left'),
             knobR: document.getElementById('knob-right'),
             stickL: document.getElementById('stick-left'),
-            stickR: document.getElementById('stick-right')
+            stickR: document.getElementById('stick-right'),
+            btnStart: document.getElementById('btn-start'),
+            btnOst: document.getElementById('btn-ost'),
+            btnTitle: document.getElementById('btn-title'),
+            titleText: document.querySelector('#overlay h1')
         };
 
-        // --- Game State ---
-        let width, height;
-        let worldSize = 0;
-        let camera = { x: 0, y: 0 };
-
+        let width, height, worldSize = 0, camera = { x: 0, y: 0 };
         let gameState = 'TITLE';
         let previousGameState = '';
         let score = 0, frame = 0, stage = 1;
-        let spawnedCount = 0, enemiesToSpawn = 0, isStageClear = false;
-        let killCount = 0;
+        let spawnedCount = 0, enemiesToSpawn = 0, isStageClear = false, killCount = 0;
+        let dyingTimer = 0;
 
         const player = { x: 0, y: 0, vx: 0, vy: 0, angle: 0, satellites: [], shield: 100, weaponLevel: 1, invuln: 0, laserTimer: 0 };
         const input = { move: { x: 0, y: 0, active: false }, aim: { x: 0, y: 0, active: false }, keys: {} };
         let bullets = [], lasers = [], enemies = [], enemyBullets = [], particles = [], crystals = [], missiles = [], powerups = [], wormholes = [], scorePopups = [], gridPoints = [], rings = [], stars = [];
 
-        // --- Audio ---
+        // --- Audio System ---
         const BGM_FILES = {
             title: 'audio/Neo_Gravity_Title.mp3',
             clear: 'audio/Neo_Gravity_Clear.mp3',
@@ -413,10 +415,7 @@
             ctx: null, bgmEl: null, currentSrc: null, noiseBuffer: null,
             init() {
                 if (!this.ctx) {
-                    try {
-                        const AC = window.AudioContext || window.webkitAudioContext;
-                        if (AC) { this.ctx = new AC(); this.createNoise(); }
-                    } catch (e) { console.error(e); }
+                    try { const AC = window.AudioContext || window.webkitAudioContext; if (AC) { this.ctx = new AC(); this.createNoise(); } } catch (e) { }
                 }
                 if (!this.bgmEl) { this.bgmEl = new Audio(); this.bgmEl.loop = true; this.bgmEl.volume = 0.4; }
             },
@@ -448,21 +447,15 @@
                     mod.connect(modGain); modGain.connect(o.frequency); mod.start(t); mod.stop(t + 0.15);
                     g.gain.setValueAtTime(0.15, t); g.gain.linearRampToValueAtTime(0, t + 0.15);
                     o.connect(g); o.start(t); o.stop(t + 0.15);
-                } else if (type === 'explode') {
+                } else if (type === 'explode' || type === 'dragon_explode') {
                     if (this.noiseBuffer) {
                         const n = this.ctx.createBufferSource(); n.buffer = this.noiseBuffer;
                         const f = this.ctx.createBiquadFilter(); f.type = 'lowpass';
-                        f.frequency.setValueAtTime(600, t); f.frequency.exponentialRampToValueAtTime(20, t + 0.5);
-                        g.gain.setValueAtTime(0.6, t); g.gain.exponentialRampToValueAtTime(0.01, t + 0.5);
-                        n.connect(f); f.connect(g); n.start(t); n.stop(t + 0.5);
-                    }
-                } else if (type === 'dragon_explode') {
-                    if (this.noiseBuffer) {
-                        const n = this.ctx.createBufferSource(); n.buffer = this.noiseBuffer;
-                        const f = this.ctx.createBiquadFilter(); f.type = 'lowpass';
-                        f.frequency.setValueAtTime(200, t); f.frequency.linearRampToValueAtTime(10, t + 1.5);
-                        g.gain.setValueAtTime(0.8, t); g.gain.exponentialRampToValueAtTime(0.01, t + 1.5);
-                        n.connect(f); f.connect(g); n.start(t); n.stop(t + 1.5);
+                        const startFreq = type === 'dragon_explode' ? 200 : 600;
+                        const dur = type === 'dragon_explode' ? 1.5 : 0.5;
+                        f.frequency.setValueAtTime(startFreq, t); f.frequency.exponentialRampToValueAtTime(20, t + dur);
+                        g.gain.setValueAtTime(type === 'dragon_explode' ? 0.8 : 0.6, t); g.gain.exponentialRampToValueAtTime(0.01, t + dur);
+                        n.connect(f); f.connect(g); n.start(t); n.stop(t + dur);
                     }
                 } else if (type === 'launch') {
                     const o = this.ctx.createOscillator(); o.type = 'square';
@@ -488,20 +481,16 @@
             },
             playBGM(key, idx = 0) {
                 if (!this.bgmEl) return;
-                let src = "";
-                if (key === 'title') src = BGM_FILES.title;
-                else if (key === 'clear') src = BGM_FILES.clear;
-                else if (key === 'stage') src = BGM_FILES.stages[idx % BGM_FILES.stages.length];
+                let src = key === 'title' ? BGM_FILES.title : key === 'clear' ? BGM_FILES.clear : BGM_FILES.stages[idx % BGM_FILES.stages.length];
                 if (this.currentSrc === src && !this.bgmEl.paused) return;
-                this.bgmEl.src = src; this.bgmEl.currentTime = 0; this.bgmEl.play().catch(e => { console.warn("BGM Error:", e); });
+                this.bgmEl.src = src; this.bgmEl.currentTime = 0; this.bgmEl.play().catch(e => { });
                 this.currentSrc = src;
             },
             stopBGM() { if (this.bgmEl) this.bgmEl.pause(); },
             pauseBGM() { if (this.bgmEl && !this.bgmEl.paused) this.bgmEl.pause(); },
             resumeBGM() { if (this.bgmEl && this.bgmEl.paused && this.currentSrc) this.bgmEl.play().catch(() => { }); }
         };
-
-        // --- Functions missing in previous code ---
+        // --- Menu Logic ---
         function openOST() {
             AudioSys.resume();
             gameState = 'OST';
@@ -528,12 +517,7 @@
             });
         }
 
-        function closeOST() {
-            gameState = 'TITLE';
-            ui.ost.style.display = 'none';
-            ui.overlay.style.display = 'flex';
-            AudioSys.playBGM('title');
-        }
+        function closeOST() { returnToTitle(); }
 
         function launchSatellites() {
             if (player.satellites.length === 0) return;
@@ -597,7 +581,7 @@
             ui.controls.style.display = 'block';
 
             score = 0;
-            stage = 3; // Difficulty fix: start at 3
+            stage = 1;
             frame = 0;
 
             player.x = worldSize / 2;
@@ -615,12 +599,56 @@
             startStage();
         }
 
+        function resetGame() {
+            // Variable Reset
+            score = 0; stage = 3; frame = 0;
+            spawnedCount = 0; enemiesToSpawn = 0; isStageClear = false; killCount = 0;
+            bullets = []; lasers = []; enemies = []; enemyBullets = []; particles = []; crystals = []; missiles = []; powerups = []; wormholes = []; scorePopups = []; rings = [];
+
+            player.x = worldSize / 2; player.y = worldSize / 2;
+            player.vx = 0; player.vy = 0;
+            player.shield = 100; player.weaponLevel = 2; player.invuln = 0; player.laserTimer = 0; player.satellites = [];
+
+            // UI Reset
+            ui.score.innerText = "000000"; ui.stage.innerText = "3"; ui.wLv.innerText = "2";
+            ui.shieldBar.style.width = "100%"; ui.shieldBar.classList.remove('shield-critical');
+            ui.shieldBar.style.backgroundColor = '#0ff';
+            ui.enemyBar.style.width = "100%";
+            ui.warn.style.display = 'none'; ui.msg.style.display = 'none';
+            ui.overlay.style.display = 'none'; ui.controls.style.display = 'block';
+
+            // Restart Logic
+            AudioSys.playBGM('stage', 0);
+            gameState = 'PLAYING';
+            startStage();
+        }
+
+        function returnToTitle() {
+            gameState = 'TITLE';
+            ui.ost.style.display = 'none';
+            ui.overlay.style.display = 'flex';
+            ui.controls.style.display = 'none';
+            ui.msg.style.display = 'none';
+
+            ui.titleText.innerHTML = `NEON GRAVITY<br><span style="font-size:20px;color:#fff;">ORBITAL</span>`;
+            ui.titleText.style.color = '#0ff'; ui.titleText.style.textShadow = '0 0 20px #0ff';
+
+            ui.btnStart.innerText = 'START GAME';
+            ui.btnStart.style.borderColor = '#0ff'; ui.btnStart.style.color = '#0ff';
+            ui.btnStart.onclick = startGame;
+
+            ui.btnOst.style.display = 'block';
+            ui.btnTitle.style.display = 'none';
+            AudioSys.playBGM('title');
+        }
+
         function startStage() {
             enemiesToSpawn = SPAWN_SETTINGS.BASE_ENEMIES + (stage * SPAWN_SETTINGS.ENEMIES_PER_STAGE);
             spawnedCount = 0; isStageClear = false; killCount = 0;
             ui.msg.style.display = 'none';
             bullets = []; lasers = []; enemies = []; enemyBullets = []; crystals = []; missiles = []; powerups = []; wormholes = []; scorePopups = []; rings = [];
-            if (stage > 1) AudioSys.playBGM('stage', stage - 1);
+
+            if (gameState === 'PLAYING' && stage > 1) AudioSys.playBGM('stage', stage - 1);
 
             const whCount = Math.max(1, Math.floor((stage + 1) / 2));
             for (let i = 0; i < whCount; i++) spawnWormhole();
@@ -635,76 +663,39 @@
             distortGrid(wormholes[wormholes.length - 1].x, wormholes[wormholes.length - 1].y, 50, 150);
         }
 
-        function resetGame() {
-            // Soft Reset
-            score = 0; stage = 3; frame = 0;
-            spawnedCount = 0; enemiesToSpawn = 0; isStageClear = false; killCount = 0;
-            bullets = []; lasers = []; enemies = []; enemyBullets = []; particles = []; crystals = []; missiles = []; powerups = []; wormholes = []; scorePopups = []; rings = [];
-
-            player.x = worldSize / 2; player.y = worldSize / 2;
-            player.vx = 0; player.vy = 0;
-            player.shield = 100; player.weaponLevel = 2; player.invuln = 0; player.laserTimer = 0; player.satellites = [];
-
-            ui.score.innerText = "000000"; ui.stage.innerText = "3"; ui.wLv.innerText = "2";
-            ui.shieldBar.style.width = "100%"; ui.shieldBar.classList.remove('shield-critical');
-            ui.shieldBar.style.backgroundColor = '#0ff';
-            ui.enemyBar.style.width = "100%";
-            ui.warn.style.display = 'none'; ui.msg.style.display = 'none';
-            ui.overlay.style.display = 'none'; ui.controls.style.display = 'block';
-
-            const titleEl = ui.overlay.querySelector('h1');
-            if (titleEl) {
-                titleEl.innerHTML = `NEON GRAVITY<br><span style="font-size:20px;color:#fff;">ORBITAL</span>`;
-                titleEl.style.color = '#0ff'; titleEl.style.textShadow = '0 0 20px #0ff';
-            }
-            const startBtn = document.getElementById('btn-start');
-            if (startBtn) {
-                startBtn.innerText = 'START GAME'; startBtn.style.borderColor = '#0ff'; startBtn.style.color = '#0ff';
-                startBtn.onclick = startGame; startBtn.ontouchstart = null;
-            }
-            const ostBtn = document.getElementById('btn-ost');
-            if (ostBtn) ostBtn.style.display = 'block';
-
-            startGame();
-        }
-
         function spawnEnemy(x, y, type) {
             const spd = SPEED_SCALE;
-            const burstAngle = Math.random() * Math.PI * 2;
-            const burstSpeed = 5.0 * spd;
-            const vx = Math.cos(burstAngle) * burstSpeed;
-            const vy = Math.sin(burstAngle) * burstSpeed;
-
+            const angle = Math.random() * Math.PI * 2;
+            const bSpd = 5.0 * spd;
+            const vx = Math.cos(angle) * bSpd; const vy = Math.sin(angle) * bSpd;
             const rnd = Math.random();
-            let dropType = 'crystal';
-            if (rnd < 0.1) dropType = 'laser'; else if (rnd < 0.3) dropType = 'level';
+            let dropType = rnd < 0.1 ? 'laser' : rnd < 0.3 ? 'level' : 'crystal';
 
             if (type === 'dragon') {
                 let e = { x: x, y: y, vx: vx, vy: vy, hp: 8, speed: ENEMY_SPEEDS.DRAGON * spd, color: '#f00', type: 'dragon', angle: 0, segments: [], drop: 'invincible', scale: 0.9, fireTimer: 0 };
                 for (let i = 0; i < 16; i++) e.segments.push({ x: x, y: y, angle: 0 });
                 enemies.push(e); spawnedCount++;
             } else if (type === 'cube') {
-                let e = { x: x, y: y, vx: vx, vy: vy, hp: 2, speed: ENEMY_SPEEDS.CUBE * spd, color: '#0f0', type: 'cube', angle: 0, drop: dropType, scale: 0.8, rotX: 0, rotY: 0 };
-                enemies.push(e); spawnedCount++;
+                enemies.push({ x, y, vx, vy, hp: 2, speed: ENEMY_SPEEDS.CUBE * spd, color: '#0f0', type: 'cube', angle: 0, drop: dropType, scale: 0.8, rotX: 0, rotY: 0 });
+                spawnedCount++;
             } else if (type === 'tadpole') {
-                let e = { x: x, y: y, vx: vx, vy: vy, hp: 1, speed: ENEMY_SPEEDS.TADPOLE * spd, color: '#fff', type: 'tadpole', angle: 0, drop: 'none', scale: 0.6, history: [] };
-                enemies.push(e); spawnedCount++;
+                enemies.push({ x, y, vx, vy, hp: 1, speed: ENEMY_SPEEDS.TADPOLE * spd, color: '#fff', type: 'tadpole', angle: 0, drop: 'none', scale: 0.6, history: [] });
+                spawnedCount++;
             } else if (type === 'triangle') {
                 const forms = ['V', 'line', 'circle'];
                 const form = forms[Math.floor(Math.random() * forms.length)];
                 const initialAngle = Math.atan2(vy, vx);
                 const leader = { x: x, y: y, vx: vx, vy: vy, hp: 1, speed: ENEMY_SPEEDS.TRIANGLE * spd, color: '#d0f', type: 'triangle', angle: initialAngle, drop: dropType, scale: 0.7, isLeader: true, followers: [], rotX: Math.random() * Math.PI, rotY: Math.random() * Math.PI, rotZ: Math.random() * Math.PI };
                 enemies.push(leader); spawnedCount++;
-
                 for (let i = 1; i <= 4; i++) {
                     if (spawnedCount >= enemiesToSpawn) break;
-                    let baseOffX = 0, baseOffY = 0;
-                    if (form === 'V') { const spreadX = 20; const depthY = -30; baseOffX = Math.ceil(i / 2) * depthY; baseOffY = (i % 2 === 0 ? 1 : -1) * Math.ceil(i / 2) * spreadX; }
-                    else if (form === 'line') { baseOffX = -Math.ceil(i / 2) * 45; baseOffY = 0; }
-                    else { const angle = (Math.PI * 2 / 5) * i; baseOffX = Math.cos(angle) * 40; baseOffY = Math.sin(angle) * 40; }
-                    const rotatedOffX = baseOffX * Math.cos(initialAngle) - baseOffY * Math.sin(initialAngle);
-                    const rotatedOffY = baseOffX * Math.sin(initialAngle) + baseOffY * Math.cos(initialAngle);
-                    let e = { x: x + rotatedOffX, y: y + rotatedOffY, vx: vx, vy: vy, hp: 1, speed: ENEMY_SPEEDS.TRIANGLE * spd, color: '#d0f', type: 'triangle', angle: initialAngle, drop: 'none', scale: 0.7, leader: leader, formOffset: { x: baseOffX, y: baseOffY }, rotX: Math.random() * Math.PI, rotY: Math.random() * Math.PI, rotZ: Math.random() * Math.PI };
+                    let offX = 0, offY = 0;
+                    if (form === 'V') { offX = Math.ceil(i / 2) * -30; offY = (i % 2 === 0 ? 1 : -1) * Math.ceil(i / 2) * 20; }
+                    else if (form === 'line') { offX = -Math.ceil(i / 2) * 45; }
+                    else { const a = (Math.PI * 2 / 5) * i; offX = Math.cos(a) * 40; offY = Math.sin(a) * 40; }
+                    const rx = offX * Math.cos(initialAngle) - offY * Math.sin(initialAngle);
+                    const ry = offX * Math.sin(initialAngle) + offY * Math.cos(initialAngle);
+                    let e = { x: x + rx, y: y + ry, vx, vy, hp: 1, speed: ENEMY_SPEEDS.TRIANGLE * spd, color: '#d0f', type: 'triangle', angle: initialAngle, drop: 'none', scale: 0.7, leader: leader, formOffset: { x: offX, y: offY }, rotX: Math.random() * Math.PI, rotY: Math.random() * Math.PI, rotZ: Math.random() * Math.PI };
                     enemies.push(e); leader.followers.push(e); spawnedCount++;
                 }
             }
@@ -715,45 +706,71 @@
             requestAnimationFrame(loop);
             if (gameState === 'PAUSED') return;
             ctx.fillStyle = '#050505'; ctx.fillRect(0, 0, width, height);
+
             if (gameState === 'PLAYING') update();
+            else if (gameState === 'DYING') updateDying();
+
             draw();
+        }
+
+        function updateDying() {
+            dyingTimer--;
+            camera.x += (Math.random() - 0.5) * 5; camera.y += (Math.random() - 0.5) * 5;
+            updateGrid(); updateParticlesAndRings(); updateEnemyBullets(); updateEnemiesForDying();
+            if (dyingTimer <= 0) showGameOver();
+        }
+
+        function updateEnemiesForDying() {
+            enemies.forEach(e => {
+                e.x += e.vx; e.y += e.vy;
+                if (e.type === 'dragon') {
+                    let lx = e.x, ly = e.y;
+                    e.segments.forEach(s => { const dd = Math.hypot(lx - s.x, ly - s.y); if (dd > 10) { s.x += (lx - s.x) * 0.3; s.y += (ly - s.y) * 0.3; } lx = s.x; ly = s.y; });
+                }
+            });
+        }
+
+        function showGameOver() {
+            gameState = 'GAMEOVER';
+            AudioSys.stopBGM();
+            ui.controls.style.display = 'none';
+            ui.overlay.style.display = 'flex';
+
+            ui.titleText.innerHTML = `GAME OVER<br><span style="font-size:20px;color:#f00;">SCORE: ${score}</span>`;
+            ui.titleText.style.color = '#f00'; ui.titleText.style.textShadow = '0 0 20px #f00';
+
+            ui.btnStart.innerText = 'RETRY';
+            ui.btnStart.style.borderColor = '#f00'; ui.btnStart.style.color = '#f00';
+            ui.btnStart.onclick = (e) => { e.stopPropagation(); e.preventDefault(); resetGame(); };
+
+            ui.btnOst.style.display = 'none';
+            ui.btnTitle.style.display = 'block';
+            ui.btnTitle.style.borderColor = '#f00'; ui.btnTitle.style.color = '#f00';
+            ui.btnTitle.onclick = (e) => { e.stopPropagation(); e.preventDefault(); returnToTitle(); };
         }
 
         function update() {
             frame++;
-            if (!Number.isFinite(player.x) || !Number.isFinite(player.y)) { player.x = worldSize / 2; player.y = worldSize / 2; player.vx = 0; player.vy = 0; }
+            if (!Number.isFinite(player.x)) { player.x = worldSize / 2; player.y = worldSize / 2; player.vx = 0; player.vy = 0; }
 
-            // Controls (Keyboard)
+            // Controls
             let mx = input.keys['ArrowLeft'] ? -1 : input.keys['ArrowRight'] ? 1 : input.move.x;
             let my = input.keys['ArrowUp'] ? -1 : input.keys['ArrowDown'] ? 1 : input.move.y;
-            const mag = Math.hypot(mx, my);
-            if (mag > 1) { mx /= mag; my /= mag; }
-            const moveSpeed = 7.8 * SPEED_SCALE;
-            player.vx = mx * moveSpeed; player.vy = my * moveSpeed;
+            const mag = Math.hypot(mx, my); if (mag > 1) { mx /= mag; my /= mag; }
+            player.vx = mx * 7.8 * SPEED_SCALE; player.vy = my * 7.8 * SPEED_SCALE;
             player.x += player.vx; player.y += player.vy;
-
-            if (player.x < WALL_MARGIN) { player.x = WALL_MARGIN; player.vx = 0; }
-            if (player.x > worldSize - WALL_MARGIN) { player.x = worldSize - WALL_MARGIN; player.vx = 0; }
-            if (player.y < WALL_MARGIN) { player.y = WALL_MARGIN; player.vy = 0; }
-            if (player.y > worldSize - WALL_MARGIN) { player.y = worldSize - WALL_MARGIN; player.vy = 0; }
-
+            if (player.x < WALL_MARGIN) player.x = WALL_MARGIN; if (player.x > worldSize - WALL_MARGIN) player.x = worldSize - WALL_MARGIN;
+            if (player.y < WALL_MARGIN) player.y = WALL_MARGIN; if (player.y > worldSize - WALL_MARGIN) player.y = worldSize - WALL_MARGIN;
             camera.x = player.x - width / 2; camera.y = player.y - height / 2;
 
             if (input.aim.active) player.angle = Math.atan2(input.aim.y, input.aim.x);
             else if (Math.hypot(mx, my) > 0.1) player.angle = Math.atan2(my, mx);
 
-            // --- 修正: レーザー中は発射間隔を短くする ---
-            // 4 = レーザー時の間隔（小さいほど速い）
-            // 10 = 通常弾の間隔（小さいほど速い）
             const fireInterval = player.laserTimer > 0 ? 4 : 6;
-
             if ((input.aim.active || input.keys['Space'] || input.keys['KeyZ']) && frame % fireInterval === 0) fire();
 
             const maxWormholes = SPAWN_SETTINGS.MAX_WORMHOLES_BASE + stage;
-            // ワームホールの新規発生判定
-            if (spawnedCount < enemiesToSpawn && wormholes.filter(w => w.active).length < maxWormholes && Math.random() < SPAWN_SETTINGS.WORMHOLE_CHANCE) {
-                spawnWormhole();
-            }
+            if (spawnedCount < enemiesToSpawn && wormholes.filter(w => w.active).length < maxWormholes && Math.random() < SPAWN_SETTINGS.WORMHOLE_CHANCE) spawnWormhole();
 
             wormholes.forEach((w) => {
                 w.life--;
@@ -780,13 +797,10 @@
                 s.x = player.x + Math.cos(s.angle + off) * rad; s.y = player.y + Math.sin(s.angle + off) * rad;
             });
 
-            updateEntities();
-            updateGrid();
-            updateScorePopups();
+            updateEntities(); updateGrid(); updateScorePopups();
 
             const enemyRemains = (enemiesToSpawn - killCount);
-            const forcePct = Math.max(0, (enemyRemains / enemiesToSpawn) * 100);
-            ui.enemyBar.style.width = `${forcePct}%`;
+            ui.enemyBar.style.width = `${Math.max(0, (enemyRemains / enemiesToSpawn) * 100)}%`;
 
             if (spawnedCount >= enemiesToSpawn && enemies.length === 0 && !isStageClear) {
                 isStageClear = true; ui.msg.style.display = 'block'; AudioSys.playBGM('clear');
@@ -860,26 +874,19 @@
 
         function updateDragonAI(e) {
             const dx = player.x - e.x, dy = player.y - e.y, d = Math.hypot(dx, dy) || 0.001;
-            e.vx += (dx / d) * DRAGON_ACCELERATION * SPEED_SCALE; e.vy += (dy / d) * DRAGON_ACCELERATION * SPEED_SCALE;
-            e.vx *= 0.98; e.vy *= 0.98;
+            e.vx += (dx / d) * DRAGON_ACCELERATION * SPEED_SCALE; e.vy += (dy / d) * DRAGON_ACCELERATION * SPEED_SCALE; e.vx *= 0.98; e.vy *= 0.98;
             const cv = Math.hypot(e.vx, e.vy); const lim = ENEMY_SPEEDS.DRAGON * SPEED_SCALE;
             if (cv > lim) { e.vx = (e.vx / cv) * lim; e.vy = (e.vy / cv) * lim; }
             e.x += e.vx; e.y += e.vy; e.angle = Math.atan2(dy, dx);
-            let lx = e.x, ly = e.y;
-            e.segments.forEach(s => { const dd = Math.hypot(lx - s.x, ly - s.y); if (dd > 10) { s.x += (lx - s.x) * 0.3; s.y += (ly - s.y) * 0.3; } lx = s.x; ly = s.y; });
+            let lx = e.x, ly = e.y; e.segments.forEach(s => { const dd = Math.hypot(lx - s.x, ly - s.y); if (dd > 10) { s.x += (lx - s.x) * 0.3; s.y += (ly - s.y) * 0.3; } lx = s.x; ly = s.y; });
             e.fireTimer++;
-            if (e.fireTimer > 100) {
-                e.fireTimer = 0; const bSpd = BULLET_SETTINGS.ENEMY_SPEED * SPEED_SCALE;
-                enemyBullets.push({ x: e.x, y: e.y, vx: Math.cos(e.angle) * bSpd, vy: Math.sin(e.angle) * bSpd, life: BULLET_SETTINGS.ENEMY_LIFE });
-                AudioSys.playSE('shoot');
-            }
+            if (e.fireTimer > 100) { e.fireTimer = 0; const bSpd = BULLET_SETTINGS.ENEMY_SPEED * SPEED_SCALE; enemyBullets.push({ x: e.x, y: e.y, vx: Math.cos(e.angle) * bSpd, vy: Math.sin(e.angle) * bSpd, life: BULLET_SETTINGS.ENEMY_LIFE }); AudioSys.playSE('shoot'); }
         }
 
         function updateTadpoleAI(e) {
             const dx = player.x - e.x, dy = player.y - e.y, d = Math.hypot(dx, dy) || 0.001;
             e.vx += (dx / d) * 0.2 * SPEED_SCALE; e.vy += (dy / d) * 0.2 * SPEED_SCALE;
-            const cv = Math.hypot(e.vx, e.vy);
-            if (cv > e.speed) { e.vx = (e.vx / cv) * e.speed; e.vy = (e.vy / cv) * e.speed; }
+            const cv = Math.hypot(e.vx, e.vy); if (cv > e.speed) { e.vx = (e.vx / cv) * e.speed; e.vy = (e.vy / cv) * e.speed; }
             e.x += e.vx; e.y += e.vy; e.angle = Math.atan2(dy, dx);
             e.history.unshift({ x: e.x, y: e.y }); if (e.history.length > 60) e.history.pop();
         }
@@ -887,17 +894,14 @@
         function updateTriangleAI(e) {
             const dx = player.x - e.x, dy = player.y - e.y, d = Math.hypot(dx, dy) || 0.001;
             e.vx += (dx / d) * 0.2 * SPEED_SCALE; e.vy += (dy / d) * 0.2 * SPEED_SCALE;
-            const cv = Math.hypot(e.vx, e.vy);
-            if (cv > e.speed) { e.vx = (e.vx / cv) * e.speed; e.vy = (e.vy / cv) * e.speed; }
-            e.x += e.vx; e.y += e.vy; e.angle = Math.atan2(e.vy, e.vx);
-            e.rotX += 0.08; e.rotY += 0.12; e.rotZ += 0.05;
+            const cv = Math.hypot(e.vx, e.vy); if (cv > e.speed) { e.vx = (e.vx / cv) * e.speed; e.vy = (e.vy / cv) * e.speed; }
+            e.x += e.vx; e.y += e.vy; e.angle = Math.atan2(e.vy, e.vx); e.rotX += 0.08; e.rotY += 0.12; e.rotZ += 0.05;
         }
 
         function updateCubeAI(e) {
             const dx = player.x - e.x, dy = player.y - e.y, d = Math.hypot(dx, dy) || 0.001;
             e.vx += (dx / d) * 0.2 * SPEED_SCALE; e.vy += (dy / d) * 0.2 * SPEED_SCALE;
-            const cv = Math.hypot(e.vx, e.vy);
-            if (cv > e.speed) { e.vx = (e.vx / cv) * e.speed; e.vy = (e.vy / cv) * e.speed; }
+            const cv = Math.hypot(e.vx, e.vy); if (cv > e.speed) { e.vx = (e.vx / cv) * e.speed; e.vy = (e.vy / cv) * e.speed; }
             e.x += e.vx; e.y += e.vy; e.rotX += 0.03; e.rotY += 0.04;
         }
 
@@ -927,6 +931,7 @@
         }
 
         function checkPlayerCollision(e) {
+            if (gameState === 'DYING') return;
             const dist = Math.hypot(player.x - e.x, player.y - e.y);
             const collisionDist = (e.type === 'tadpole') ? (40 * (e.scale / 0.6)) : 25;
             if (dist < collisionDist) {
@@ -946,10 +951,38 @@
 
         function updateEnemyBullets() {
             enemyBullets.forEach(eb => {
-                eb.x += eb.vx; eb.y += eb.vy; eb.life--;
-                // Fix: Hitbox size reduced from 15 to 6
-                if (Math.hypot(player.x - eb.x, player.y - eb.y) < 6 && player.invuln <= 0) {
-                    eb.life = 0; createExplosion(player.x, player.y, '#f00', 10); damage(15);
+                // 移動前の座標を保存
+                const oldX = eb.x;
+                const oldY = eb.y;
+
+                // 移動実行
+                eb.x += eb.vx;
+                eb.y += eb.vy;
+                eb.life--;
+
+                if (gameState !== 'DYING' && player.invuln <= 0) {
+                    // --- トンネル現象対策: 線分と点の距離で判定 ---
+                    // 弾の移動前(old)と移動後(eb)を結ぶ線分と、プレイヤーの中心座標の距離を計算
+                    const dx = eb.x - oldX;
+                    const dy = eb.y - oldY;
+                    const t = ((player.x - oldX) * dx + (player.y - oldY) * dy) / (dx * dx + dy * dy);
+
+                    // 線分の範囲内に限定 (0〜1)
+                    const closestT = Math.max(0, Math.min(1, t));
+
+                    // 線分上の最もプレイヤーに近い点の座標
+                    const closestX = oldX + closestT * dx;
+                    const closestY = oldY + closestT * dy;
+
+                    // その点とプレイヤーの距離を測る
+                    const dist = Math.hypot(player.x - closestX, player.y - closestY);
+
+                    // 当たり判定のしきい値（12〜15くらいが適正）
+                    if (dist < 15) {
+                        eb.life = 0;
+                        createExplosion(player.x, player.y, '#f00', 10);
+                        damage(15);
+                    }
                 }
             });
             enemyBullets = enemyBullets.filter(eb => eb.life > 0);
@@ -958,9 +991,21 @@
         function updateCrystals() {
             crystals.forEach(c => {
                 c.life--;
-                const dx = player.x - c.x, dy = player.y - c.y; const d = Math.hypot(dx, dy) || 0.0001;
-                const factor = 0.03 + (d * 0.0005); c.x += dx * factor; c.y += dy * factor;
-                if (d < 20) { c.life = 0; if (player.satellites.length < 12) player.satellites.push({}); }
+                const dx = player.x - c.x, dy = player.y - c.y;
+                const d = Math.hypot(dx, dy) || 0.0001;
+
+                // 数値を引き上げ（0.03 → 0.08 / 0.0005 → 0.001）
+                // これにより、遠くからでも加速しながら一気に自機へ飛び込んできます
+                const factor = 0.03 + (d * 0.0005);
+
+                c.x += dx * factor;
+                c.y += dy * factor;
+
+                // 取得判定（d < 20）はそのまま
+                if (d < 20) {
+                    c.life = 0;
+                    if (player.satellites.length < 12) player.satellites.push({});
+                }
             });
             crystals = crystals.filter(c => c.life > 0);
         }
@@ -999,7 +1044,6 @@
         }
 
         function updatePlayerStatus() { if (player.invuln > 0) player.invuln--; }
-
         function updateScorePopups() { scorePopups.forEach(s => { s.y += s.vy; s.life--; s.alpha = s.life / 30; }); scorePopups = scorePopups.filter(s => s.life > 0); }
 
         function destroyEnemy(e) {
@@ -1021,22 +1065,17 @@
             player.shield -= v; player.invuln = 5;
             ui.shieldBar.style.width = Math.max(0, player.shield) + "%";
             AudioSys.playSE('damage'); distortGrid(player.x, player.y, 50, 100);
+
             if (player.shield <= 0) {
-                gameState = 'GAMEOVER'; AudioSys.stopBGM();
-                ui.controls.style.display = 'none'; ui.overlay.style.display = 'flex';
-                const titleEl = ui.overlay.querySelector('h1');
-                if (titleEl) { titleEl.innerHTML = `GAME OVER<br><span style="font-size:20px;color:#f00;">SCORE: ${score}</span>`; titleEl.style.color = '#f00'; titleEl.style.textShadow = '0 0 20px #f00'; }
-                const startBtn = document.getElementById('btn-start');
-                if (startBtn) {
-                    startBtn.innerText = 'RETRY'; startBtn.style.borderColor = '#f00'; startBtn.style.color = '#f00';
-                    const doRetry = (e) => { e.stopPropagation(); e.preventDefault(); resetGame(); };
-                    startBtn.onclick = doRetry; startBtn.ontouchstart = doRetry;
-                }
-                const ostBtn = document.getElementById('btn-ost');
-                if (ostBtn) ostBtn.style.display = 'none';
+                gameState = 'DYING';
+                dyingTimer = 120;
+                createExplosion(player.x, player.y, '#0f8', 100);
+                AudioSys.playSE('dragon_explode');
+                distortGrid(player.x, player.y, 100, 200);
             }
         }
 
+        // --- Draw ---
         function draw() {
             ctx.save(); ctx.translate(-camera.x, -camera.y);
             ctx.fillStyle = '#fff';
@@ -1089,6 +1128,7 @@
             });
             ctx.shadowBlur = 0;
 
+            // Player Draw (Only if playing)
             if (gameState === 'PLAYING') {
                 ctx.save(); ctx.translate(player.x, player.y); ctx.rotate(player.angle); ctx.scale(G_SCALE, G_SCALE);
                 let shipColor = '#0f8'; if (player.invuln > 0) shipColor = '#ff0'; else if (player.laserTimer > 0) shipColor = '#0ff';
@@ -1230,48 +1270,40 @@
         }
 
         // --- PAUSE Control ---
-        function togglePause(forcedState) {
-            const newState = forcedState !== undefined ? forcedState : (gameState === 'PAUSED');
-            if (newState) {
-                // Resume
-                if (gameState === 'PAUSED') {
-                    gameState = previousGameState;
-                    ui.pauseOverlay.style.display = 'none';
-                    AudioSys.resumeBGM();
-                }
-            } else {
-                // Pause
+        function setPaused(paused) {
+            if (paused) {
                 if (gameState === 'PLAYING' || gameState === 'OST') {
                     previousGameState = gameState;
                     gameState = 'PAUSED';
                     ui.pauseOverlay.style.display = 'flex';
                     AudioSys.pauseBGM();
                 }
+            } else {
+                if (gameState === 'PAUSED') {
+                    gameState = previousGameState || 'PLAYING';
+                    ui.pauseOverlay.style.display = 'none';
+                    AudioSys.resumeBGM();
+                }
             }
         }
 
-        // --- Event Listeners for Visibility Change ---
-        document.addEventListener('visibilitychange', () => { if (document.hidden) togglePause(false); });
-        window.addEventListener('blur', () => togglePause(false));
-        ui.pauseOverlay.addEventListener('click', () => togglePause(true));
-        ui.pauseOverlay.addEventListener('touchstart', (e) => { e.preventDefault(); togglePause(true); });
+        // --- Event Listeners ---
+        document.addEventListener('visibilitychange', () => { if (document.hidden) setPaused(true); });
+        window.addEventListener('blur', () => setPaused(true));
+        ui.pauseOverlay.addEventListener('click', () => setPaused(false));
+        ui.pauseOverlay.addEventListener('touchstart', (e) => { e.preventDefault(); setPaused(false); });
 
-        // --- Touch Handler Fix ---
         function handleTouch(e) {
             e.preventDefault();
             if (gameState !== 'PLAYING') return;
             input.move.active = false; input.aim.active = false;
 
-            const bRect = ui.launchBtn.getBoundingClientRect();
             const lR = ui.stickL.getBoundingClientRect(); const rR = ui.stickR.getBoundingClientRect();
             const lC = { x: lR.left + lR.width / 2, y: lR.top + lR.height / 2 };
             const rC = { x: rR.left + rR.width / 2, y: rR.top + rR.height / 2 };
 
             for (let i = 0; i < e.touches.length; i++) {
                 const t = e.touches[i];
-                if (t.clientX >= bRect.left && t.clientX <= bRect.right && t.clientY >= bRect.top && t.clientY <= bRect.bottom) {
-                    launchSatellites(); continue;
-                }
                 const dL = Math.hypot(t.clientX - lC.x, t.clientY - lC.y);
                 const dR = Math.hypot(t.clientX - rC.x, t.clientY - rC.y);
 
@@ -1289,7 +1321,13 @@
             if (!input.aim.active) { input.aim.x = 0; input.aim.y = 0; ui.knobR.style.transform = 'translate(0,0)'; }
         }
 
-        ui.launchBtn.addEventListener('touchstart', (e) => { e.preventDefault(); launchSatellites(); ui.launchBtn.classList.add('active'); setTimeout(() => ui.launchBtn.classList.remove('active'), 100); });
+        ui.launchBtn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            launchSatellites();
+            ui.launchBtn.classList.add('active');
+            setTimeout(() => ui.launchBtn.classList.remove('active'), 100);
+        });
         ui.controls.addEventListener('touchstart', handleTouch, { passive: false });
         ui.controls.addEventListener('touchmove', handleTouch, { passive: false });
         ui.controls.addEventListener('touchend', handleTouch, { passive: false });
@@ -1307,7 +1345,6 @@
         window.addEventListener('keyup', e => input.keys[e.code] = false);
         window.addEventListener('resize', resize);
 
-        // Init Interaction
         let isInit = false;
         const handleInteraction = () => {
             if (isInit) return;
@@ -1322,13 +1359,8 @@
         document.addEventListener('touchstart', handleInteraction);
         document.addEventListener('keydown', handleInteraction);
 
-        function init() {
-            resize();
-            AudioSys.init();
-        }
-
-        init();
-        loop();
+        function init() { resize(); AudioSys.init(); }
+        init(); loop();
     </script>
 </body>
 </html>
