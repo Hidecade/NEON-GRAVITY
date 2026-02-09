@@ -312,19 +312,26 @@
 
         // --- 敵機の最高速度設定 (この数値をいじるだけでOK) ---
         const ENEMY_SPEEDS = {
-            TRIANGLE: 2.8, // 紫：フォーメーションを組む主力
-            CUBE: 1.5, // 緑：アイテム持ち。少し遅め
-            TADPOLE: 2.2, // 白：精子型。頭が大きい
-            DRAGON: 3.5  // 赤：ボス。加速度移動の上限値
+            TRIANGLE: 4.8,  // 紫：フォーメーションを組む主力
+            CUBE: 2.5,      // 緑：アイテム持ち。少し遅め
+            TADPOLE: 4.2,   // 白：精子型。頭が大きい
+            DRAGON: 8     // 赤：ボス。加速度移動の上限値
         };
+
+        // --- ドラゴンの加速度設定 (追加) ---
+        // 数値を大きくするとプレイヤーへの反応が鋭くなり、小さくするとゆったり動きます
+        const DRAGON_ACCELERATION = 0.2;
 
         // 武器・弾の設定 (定数化)
         const BULLET_SETTINGS = {
-            PLAYER_SPEED: 24.0,  // 自機の弾速
+            PLAYER_SPEED: 32.0,  // 自機の弾速
             PLAYER_LIFE: 120,   // 自機の弾の射程(フレーム数)
-            ENEMY_SPEED: 4.0,   // 敵の弾速
+            ENEMY_SPEED: 6.0,   // 敵の弾速
             ENEMY_LIFE: 200    // 敵の弾の射程(フレーム数)
         };
+
+        // --- LASER SETTINGS (追加) ---
+        const LASER_DURATION = 600; // レーザー持続時間 (60fps * 10秒 = 600)
 
         // --- DOM References ---
         const canvas = document.getElementById('game');
@@ -353,8 +360,8 @@
 
         const player = { x: 0, y: 0, vx: 0, vy: 0, angle: 0, satellites: [], shield: 100, weaponLevel: 1, invuln: 0 };
         const input = { move: { x: 0, y: 0, active: false }, aim: { x: 0, y: 0, active: false }, keys: {} };
+        let bullets = [], lasers = [], enemies = [], enemyBullets = [], particles = [], crystals = [], missiles = [], powerups = [], wormholes = [], scorePopups = [], gridPoints = [], rings = [], stars = [];
 
-        let bullets = [], enemies = [], enemyBullets = [], particles = [], crystals = [], missiles = [], powerups = [], wormholes = [], scorePopups = [], gridPoints = [], rings = [], stars = [];
 
         // --- Audio ---
         const BGM_FILES = {
@@ -389,6 +396,24 @@
                     o.frequency.setValueAtTime(800, t); o.frequency.exponentialRampToValueAtTime(100, t + 0.1);
                     g.gain.setValueAtTime(0.2, t); g.gain.linearRampToValueAtTime(0, t + 0.1);
                     o.connect(g); o.start(t); o.stop(t + 0.1);
+                } else if (type === 'laser') { // --- 追加: レーザー音 ---
+                    const o = this.ctx.createOscillator(); o.type = 'sawtooth';
+                    // ジジジ...という音を作る
+                    o.frequency.setValueAtTime(120, t);
+                    o.frequency.linearRampToValueAtTime(80, t + 0.15);
+
+                    // ノイズ感を出すための変調
+                    const mod = this.ctx.createOscillator();
+                    mod.type = 'square';
+                    mod.frequency.value = 500;
+                    const modGain = this.ctx.createGain();
+                    modGain.gain.value = 500;
+                    mod.connect(modGain);
+                    modGain.connect(o.frequency);
+                    mod.start(t); mod.stop(t + 0.15);
+
+                    g.gain.setValueAtTime(0.15, t); g.gain.linearRampToValueAtTime(0, t + 0.15);
+                    o.connect(g); o.start(t); o.stop(t + 0.15);
                 } else if (type === 'explode') {
                     if (this.noiseBuffer) {
                         const n = this.ctx.createBufferSource(); n.buffer = this.noiseBuffer;
@@ -509,6 +534,7 @@
             player.vx = 0; player.vy = 0;
             player.shield = 100; player.weaponLevel = 2; // Start LV2
             player.satellites = []; player.invuln = 0;
+            player.laserTimer = 0;
 
             ui.score.innerText = "000000"; ui.stage.innerText = "1"; ui.wLv.innerText = "2";
             ui.shieldBar.style.width = "100%"; ui.shieldBar.classList.remove('shield-critical');
@@ -523,7 +549,7 @@
             enemiesToSpawn = 40 + (stage * 15);
             spawnedCount = 0; isStageClear = false; killCount = 0;
             ui.msg.style.display = 'none';
-            bullets = []; enemies = []; enemyBullets = []; crystals = []; missiles = []; powerups = []; wormholes = []; scorePopups = []; rings = [];
+            bullets = []; lasers = []; enemies = []; enemyBullets = []; crystals = []; missiles = []; powerups = []; wormholes = []; scorePopups = []; rings = [];
             if (stage > 1) AudioSys.playBGM('stage', stage - 1);
 
             const whCount = Math.max(1, Math.floor((stage + 1) / 2));
@@ -578,7 +604,9 @@
             if (input.aim.active) player.angle = Math.atan2(input.aim.y, input.aim.x);
             else if (Math.hypot(mx, my) > 0.1) player.angle = Math.atan2(my, mx);
 
-            if ((input.aim.active || input.keys['Space'] || input.keys['KeyZ']) && frame % 10 === 0) fire();
+            // --- 修正: レーザー中は発射間隔を短くする ---
+            const fireInterval = player.laserTimer > 0 ? 4 : 10;
+            if ((input.aim.active || input.keys['Space'] || input.keys['KeyZ']) && frame % fireInterval === 0) fire();
 
             // Wormholes Logic
             if (spawnedCount < enemiesToSpawn && wormholes.filter(w => w.active).length < (1 + Math.floor(stage / 2)) && Math.random() < 0.02) {
@@ -630,9 +658,35 @@
 
             if (player.shield < 30) ui.shieldBar.classList.add('shield-critical');
             else ui.shieldBar.classList.remove('shield-critical');
+
+            // --- 追加: レーザータイマー処理とUI更新 ---
+            if (player.laserTimer > 0) {
+                player.laserTimer--;
+                ui.wLv.innerText = "LASER (" + Math.ceil(player.laserTimer / 60) + "s)";
+                ui.wLv.style.color = "#0ff";
+            } else {
+                ui.wLv.innerText = player.weaponLevel;
+                ui.wLv.style.color = "#fff";
+            }
         }
 
         function fire() {
+            // --- 追加: レーザー発射ロジック ---
+            if (player.laserTimer > 0) {
+                // レーザーは瞬間的に伸びるビームとして扱う
+                lasers.push({
+                    x: player.x,
+                    y: player.y,
+                    angle: player.angle,
+                    life: 5, // ビームの残存時間（短くして点滅させる）
+                    width: 40 // 当たり判定の幅
+                });
+                AudioSys.playSE('laser');
+                distortGrid(player.x, player.y, 20, 60);
+                return; // 通常弾は撃たない
+            }
+
+            // --- 既存: 通常弾発射ロジック ---
             // 定数 PLAYER_SPEED (24.0) を使用
             const s = BULLET_SETTINGS.PLAYER_SPEED * SPEED_SCALE;
 
@@ -663,10 +717,15 @@
             const vx = Math.cos(burstAngle) * burstSpeed;
             const vy = Math.sin(burstAngle) * burstSpeed;
 
-            // 30% drop level
-            const dropType = Math.random() < 0.3 ? 'level' : 'crystal';
+            // --- 修正: ドロップ確率の変更 ---
+            const rnd = Math.random();
+            let dropType = 'crystal';
+            if (rnd < 0.1) dropType = 'laser'; // 10%でレーザー
+            else if (rnd < 0.3) dropType = 'level'; // 20%でレベルアップ
+            else dropType = 'crystal'; // 残りクリスタル
 
             if (type === 'dragon') {
+                // ... (既存のコード) ...
                 let e = {
                     x: x, y: y, vx: vx, vy: vy, hp: 8,
                     speed: ENEMY_SPEEDS.DRAGON * spd,
@@ -684,6 +743,7 @@
                 enemies.push(e);
                 spawnedCount++;
             } else if (type === 'tadpole') {
+                // ... (既存のコード) ...
                 let e = {
                     x: x, y: y, vx: vx, vy: vy, hp: 1,
                     speed: ENEMY_SPEEDS.TADPOLE * spd,
@@ -692,29 +752,18 @@
                 enemies.push(e);
                 spawnedCount++;
             } else { // Triangle
+                // ... (既存のコード: Triangleは少し長いので中略せずdropTypeだけ適用されていることを確認してください) ...
                 const forms = ['V', 'line', 'circle'];
                 const form = forms[Math.floor(Math.random() * forms.length)];
                 const leader = {
-                    x: x,
-                    y: y,
-                    vx: vx,
-                    vy: vy,
-                    hp: 1,
-
-                    speed: ENEMY_SPEEDS.TRIANGLE * spd,
-
-                    color: '#d0f',
-                    type: 'triangle',
-                    angle: 0,
-                    drop: dropType,
-                    scale: 0.7,
-                    isLeader: true,
-                    followers: []
+                    x: x, y: y, vx: vx, vy: vy, hp: 1, speed: ENEMY_SPEEDS.TRIANGLE * spd, color: '#d0f', type: 'triangle',
+                    angle: 0, drop: dropType, scale: 0.7, isLeader: true, followers: []
                 };
                 enemies.push(leader);
                 spawnedCount++;
 
                 for (let i = 1; i <= 4; i++) {
+                    // ... (省略なし) ...
                     if (spawnedCount >= enemiesToSpawn) break;
                     let offX = 0, offY = 0;
                     if (form === 'V') {
@@ -744,6 +793,7 @@
          */
         function updateEntities() {
             updatePlayerBullets();
+            updateLasers(); // --- 追加 ---
             updateEnemies();
             updateEnemyBullets();
             updateCrystals();
@@ -751,6 +801,49 @@
             updateMissiles();
             updateParticlesAndRings();
             updatePlayerStatus();
+        }
+
+        /**
+         * レーザーの更新と当たり判定
+         * レーザーは線分と円の衝突判定を行う
+         */
+        function updateLasers() {
+            lasers.forEach(l => {
+                l.life--;
+
+                // レーザーの終点計算 (画面外まで届く長さ)
+                const len = 2000;
+                const p1x = l.x;
+                const p1y = l.y;
+                const p2x = l.x + Math.cos(l.angle) * len;
+                const p2y = l.y + Math.sin(l.angle) * len;
+
+                // 各敵との当たり判定
+                enemies.forEach(e => {
+                    // 線分(p1-p2)と点(e)の距離を計算
+                    const A = p1x - p2x;
+                    const B = p1y - p2y;
+                    const C = p2x * p1y - p1x * p2y;
+                    const dist = Math.abs(A * e.y - B * e.x + C) / Math.hypot(A, B);
+
+                    // 敵が自機より「前方」にいるか確認 (内積)
+                    const dot = (e.x - p1x) * (p2x - p1x) + (e.y - p1y) * (p2y - p1y);
+
+                    if (dist < (l.width / 2 + 15 * e.scale) && dot > 0) {
+                        e.hp -= 0.5; // レーザーは毎フレーム当たるので威力は抑えめ
+
+                        // ヒットエフェクト
+                        if (frame % 4 === 0) {
+                            particles.push({
+                                x: e.x, y: e.y,
+                                vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.5) * 2,
+                                color: '#0ff', life: 0.5
+                            });
+                        }
+                    }
+                });
+            });
+            lasers = lasers.filter(l => l.life > 0);
         }
 
         /**
@@ -808,8 +901,8 @@
         function updateDragonAI(e) {
             const dx = player.x - e.x, dy = player.y - e.y, d = Math.hypot(dx, dy) || 0.001;
             // 加速移動
-            e.vx += (dx / d) * 0.08 * SPEED_SCALE;
-            e.vy += (dy / d) * 0.08 * SPEED_SCALE;
+            e.vx += (dx / d) * DRAGON_ACCELERATION * SPEED_SCALE;
+            e.vy += (dy / d) * DRAGON_ACCELERATION * SPEED_SCALE;
             e.vx *= 0.98; e.vy *= 0.98; // 摩擦
             // 最高速制限
             const cv = Math.hypot(e.vx, e.vy);
@@ -975,8 +1068,22 @@
             powerups.forEach(p => {
                 if (Math.hypot(player.x - p.x, player.y - p.y) < 30) {
                     p.life = 0;
-                    player.weaponLevel = Math.min(5, player.weaponLevel + 1);
-                    ui.wLv.innerText = player.weaponLevel;
+
+                    // --- 追加: アイテム取得音 ---
+                    AudioSys.playSE('powerup');
+
+                    if (p.type === 'laser') {
+                        player.laserTimer = LASER_DURATION; // 時間設定
+                        // 取得エフェクト（青いリング）
+                        rings.push({ x: player.x, y: player.y, r: 10, color: '#0ff', life: 1 });
+                        rings.push({ x: player.x, y: player.y, r: 50, color: '#0ff', life: 1 });
+                    } else if (p.type === 'invincible') {
+                        player.invuln = 600; // 無敵
+                        AudioSys.playSE('invincible'); // 無敵音
+                    } else if (p.type === 'level') {
+                        player.weaponLevel = Math.min(5, player.weaponLevel + 1);
+                        ui.wLv.innerText = player.weaponLevel;
+                    }
                 }
             });
             powerups = powerups.filter(p => p.life > 0);
@@ -1043,7 +1150,10 @@
             scorePopups.push({ x: e.x, y: e.y, text: pts, life: 40, alpha: 1, vy: -1 });
             distortGrid(e.x, e.y, 40, 80);
             if (e.noDrop || e.drop === 'none') return;
-            if (e.drop === 'invincible') powerups.push({ x: e.x, y: e.y, type: 'invincible', life: 1000 });
+
+            // --- 修正: ドロップ生成 ---
+            if (e.drop === 'laser') powerups.push({ x: e.x, y: e.y, type: 'laser', life: 1000 });
+            else if (e.drop === 'invincible') powerups.push({ x: e.x, y: e.y, type: 'invincible', life: 1000 });
             else if (e.drop === 'level' || Math.random() < 0.05) powerups.push({ x: e.x, y: e.y, type: 'level', life: 1000 });
             else crystals.push({ x: e.x, y: e.y, life: 1000 });
         }
@@ -1064,7 +1174,7 @@
             ctx.save();
             ctx.translate(-camera.x, -camera.y);
 
-            // Stars
+            // Stars (既存)
             ctx.fillStyle = '#fff';
             stars.forEach(s => {
                 const sx = (s.x - camera.x * s.parallax) % worldSize;
@@ -1076,7 +1186,7 @@
             });
             ctx.globalAlpha = 1.0;
 
-            // Grid inside Boundary
+            // Grid inside Boundary (既存)
             ctx.save();
             ctx.beginPath(); ctx.rect(0, 0, worldSize, worldSize); ctx.clip();
 
@@ -1094,9 +1204,10 @@
             ctx.stroke(); ctx.shadowBlur = 0;
             ctx.restore();
 
-            // Boundary Frame
+            // Boundary Frame (既存)
             ctx.strokeStyle = '#0ff'; ctx.lineWidth = 3; ctx.strokeRect(WALL_MARGIN, WALL_MARGIN, worldSize - WALL_MARGIN * 2, worldSize - WALL_MARGIN * 2);
 
+            // Wormholes (既存)
             wormholes.forEach(w => {
                 if (w.active || w.life > -60) {
                     let scale = 1;
@@ -1111,6 +1222,7 @@
                 }
             });
 
+            // Enemies (既存)
             enemies.forEach(e => {
                 if (e.type === 'dragon') drawDragonEnemy(ctx, e);
                 else if (e.type === 'triangle') drawTriangleEnemy(ctx, e);
@@ -1120,9 +1232,16 @@
 
             ctx.fillStyle = '#aaf'; enemyBullets.forEach(eb => { ctx.beginPath(); ctx.arc(eb.x, eb.y, 4 * G_SCALE, 0, Math.PI * 2); ctx.fill(); });
 
+            // Player (修正: レーザー中は色を変える)
             if (gameState === 'PLAYING') {
                 ctx.save(); ctx.translate(player.x, player.y); ctx.rotate(player.angle); ctx.scale(G_SCALE, G_SCALE);
-                ctx.strokeStyle = player.invuln > 0 ? '#ff0' : '#0f8'; ctx.lineWidth = 2;
+
+                // 色の切り替え
+                let shipColor = '#0f8';
+                if (player.invuln > 0) shipColor = '#ff0';
+                else if (player.laserTimer > 0) shipColor = '#0ff'; // レーザー中はシアン
+
+                ctx.strokeStyle = shipColor; ctx.lineWidth = 2;
                 ctx.shadowBlur = 10; ctx.shadowColor = ctx.strokeStyle;
                 ctx.beginPath();
                 ctx.moveTo(20, 0); ctx.lineTo(-10, 10); ctx.lineTo(-5, 0); ctx.lineTo(-10, -10); ctx.closePath();
@@ -1133,17 +1252,34 @@
                 player.satellites.forEach(s => { ctx.fillStyle = '#0f0'; ctx.beginPath(); ctx.arc(s.x, s.y, 3, 0, Math.PI * 2); ctx.fill(); });
             }
 
+            // --- 追加: レーザー描画 ---
+            drawLasers();
+
             ctx.fillStyle = '#0f8'; bullets.forEach(b => { ctx.beginPath(); ctx.arc(b.x, b.y, 2, 0, Math.PI * 2); ctx.fill(); });
             ctx.fillStyle = '#0f0'; crystals.forEach(c => {
                 ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(frame * 0.1);
                 ctx.beginPath(); ctx.moveTo(0, -6); ctx.lineTo(4, 0); ctx.lineTo(0, 6); ctx.lineTo(-4, 0); ctx.fill(); ctx.restore();
             });
+
+            // Powerups (修正: 種類ごとの描画)
             powerups.forEach(p => {
-                ctx.strokeStyle = p.type === 'level' ? '#0f0' : '#fd0'; ctx.lineWidth = 2;
+                // 色分け
+                if (p.type === 'laser') ctx.strokeStyle = '#0ff';
+                else if (p.type === 'level') ctx.strokeStyle = '#0f0';
+                else ctx.strokeStyle = '#fd0'; // invincible
+
+                ctx.lineWidth = 2;
                 ctx.strokeRect(p.x - 8, p.y - 8, 16, 16);
                 ctx.fillStyle = ctx.strokeStyle; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-                ctx.fillText(p.type === 'level' ? 'L' : 'S', p.x, p.y);
+
+                // 文字分け
+                let char = 'S';
+                if (p.type === 'level') char = 'L';
+                else if (p.type === 'laser') char = 'B'; // Beam
+
+                ctx.fillText(char, p.x, p.y);
             });
+
             ctx.fillStyle = '#fd0'; missiles.forEach(m => { ctx.beginPath(); ctx.arc(m.x, m.y, 4 * G_SCALE, 0, Math.PI * 2); ctx.fill(); });
             particles.forEach(p => { ctx.fillStyle = p.color; ctx.globalAlpha = p.life; ctx.beginPath(); ctx.arc(p.x, p.y, 2 * G_SCALE, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1.0; });
 
@@ -1155,6 +1291,38 @@
 
             drawScorePopups();
             ctx.restore();
+        }
+
+        /**
+         * レーザーの描画処理
+         */
+        function drawLasers() {
+            lasers.forEach(l => {
+                ctx.save();
+                ctx.translate(l.x, l.y);
+                ctx.rotate(l.angle);
+
+                // 加算合成で光らせる
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.shadowBlur = 20;
+                ctx.shadowColor = '#0ff';
+
+                // ビーム本体
+                ctx.fillStyle = 'rgba(0, 255, 255, 0.8)';
+                const len = 2000;
+                // lifeに応じて細くなる演出
+                const w = l.width * (l.life / 5);
+
+                ctx.fillRect(0, -w / 2, len, w);
+
+                // コア（白）
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(0, -w / 4, len, w / 2);
+
+                ctx.restore();
+            });
+            ctx.globalCompositeOperation = 'source-over'; // 戻す
+            ctx.shadowBlur = 0;
         }
 
         function drawTriangleEnemy(ctx, e) {
