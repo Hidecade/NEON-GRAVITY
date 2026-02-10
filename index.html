@@ -431,7 +431,7 @@
         // 通常ショットの最大強化レベル（1〜5）
         const MAX_WEAPON_LEVEL = 5;
         // 背景グリッド線の間隔（小さいほど網目が細かくなる）
-        const GRID_SPACING = 5;
+        const GRID_SPACING = 25;
 
         // --- 敵の移動速度設定 ---
         const ENEMY_SPEEDS = {
@@ -1300,7 +1300,7 @@
 
             ctx.save(); ctx.beginPath(); ctx.rect(0, 0, worldSize, worldSize); ctx.clip();
 
-            ctx.strokeStyle = 'rgba(0, 150, 255, 0.15)'; // 水色(0,150,255)で透明度0.15。かなり薄くなります。
+            ctx.strokeStyle = 'rgba(0, 150, 255, 0.3)'; // 水色(0,150,255)で透明度0.15。かなり薄くなります。
             ctx.lineWidth = 1; // 線自体も少し細くすると繊細になります
             ctx.shadowBlur = 5;  // 光彩を抑える（以前は15）
             ctx.shadowColor = '#08f';
