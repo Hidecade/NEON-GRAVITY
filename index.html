@@ -431,7 +431,7 @@
         // 通常ショットの最大強化レベル（1〜5）
         const MAX_WEAPON_LEVEL = 5;
         // 背景グリッド線の間隔（小さいほど網目が細かくなる）
-        const GRID_SPACING = 30;
+        const GRID_SPACING = 5;
 
         // --- 敵の移動速度設定 ---
         const ENEMY_SPEEDS = {
@@ -1299,7 +1299,13 @@
             ctx.globalAlpha = 1.0;
 
             ctx.save(); ctx.beginPath(); ctx.rect(0, 0, worldSize, worldSize); ctx.clip();
-            ctx.strokeStyle = 'rgba(255, 255, 0, 0.4)'; ctx.lineWidth = 1; ctx.shadowBlur = 15; ctx.shadowColor = '#0ff'; ctx.beginPath();
+
+            ctx.strokeStyle = 'rgba(0, 150, 255, 0.15)'; // 水色(0,150,255)で透明度0.15。かなり薄くなります。
+            ctx.lineWidth = 1; // 線自体も少し細くすると繊細になります
+            ctx.shadowBlur = 5;  // 光彩を抑える（以前は15）
+            ctx.shadowColor = '#08f';
+
+            ctx.beginPath();
             const viewX = camera.x; const viewY = camera.y; const viewW = width; const viewH = height;
             for (let i = 0; i < gridPoints.length; i++) for (let j = 0; j < gridPoints[i].length; j++) {
                 const p = gridPoints[i][j]; if (!p) continue;
@@ -1531,10 +1537,30 @@
         }
 
         function updateGrid() {
-            for (let i = 0; i < gridPoints.length; i++) for (let j = 0; j < gridPoints[i].length; j++) {
-                const p = gridPoints[i][j]; const dx = p.x - p.ox, dy = p.y - p.oy;
-                const f = -0.05 * Math.hypot(dx, dy); const ang = Math.atan2(dy, dx);
-                p.vx += Math.cos(ang) * f; p.vy += Math.sin(ang) * f; p.vx *= 0.9; p.vy *= 0.9; p.x += p.vx; p.y += p.vy;
+            const startX = Math.max(0, Math.floor(camera.x / GRID_SPACING) - 1);
+            const endX = Math.min(gridPoints.length - 1, Math.ceil((camera.x + width) / GRID_SPACING) + 1);
+            const startY = Math.max(0, Math.floor(camera.y / GRID_SPACING) - 1);
+            const endY = Math.min(gridPoints[0].length - 1, Math.ceil((camera.y + height) / GRID_SPACING) + 1);
+
+            for (let i = startX; i <= endX; i++) {
+                for (let j = startY; j <= endY; j++) {
+                    const p = gridPoints[i][j];
+                    const dx = p.x - p.ox, dy = p.y - p.oy;
+
+                    // 第1引数（-0.12）を大きくすると波の戻りが速くなります（鋭い波）
+                    const f = -0.12 * Math.hypot(dx, dy);
+                    const ang = Math.atan2(dy, dx);
+
+                    p.vx += Math.cos(ang) * f;
+                    p.vy += Math.sin(ang) * f;
+
+                    // 摩擦係数（0.85）を少し下げると、波がより長く残ります
+                    p.vx *= 0.85;
+                    p.vy *= 0.85;
+
+                    p.x += p.vx;
+                    p.y += p.vy;
+                }
             }
         }
 
