@@ -1294,29 +1294,88 @@
             distortGrid(x, y, 60, 120);
         }
 
-        // --- PAUSE Control ---
+        // --- PAUSE Control (ポーズ表示はプレイ中のみ、BGM停止は全画面共通) ---
         function setPaused(paused) {
             if (paused) {
-                if (gameState === 'PLAYING' || gameState === 'OST') {
+                // プレイ中のみ、ポーズ画面を表示してゲームを止める
+                if (gameState === 'PLAYING') {
                     previousGameState = gameState;
                     gameState = 'PAUSED';
                     ui.pauseOverlay.style.display = 'flex';
-                    AudioSys.pauseBGM();
                 }
+                // どの画面の状態であっても、非アクティブならBGMを止める
+                AudioSys.pauseBGM();
             } else {
+                // ポーズ解除（アクティブに戻った時）
                 if (gameState === 'PAUSED') {
-                    gameState = previousGameState || 'PLAYING';
+                    gameState = 'PLAYING';
                     ui.pauseOverlay.style.display = 'none';
+                }
+                // どの画面の状態であっても、アクティブに戻ったらBGMを再開
+                AudioSys.resumeBGM();
+            }
+        }
+
+        // --- PAUSE Control (プレイ中のみポーズ画面、他はBGM停止のみ) ---
+        function setPaused(paused) {
+            if (paused) {
+                // ゲームプレイ中ならポーズ画面を表示して進行を止める
+                if (gameState === 'PLAYING') {
+                    previousGameState = gameState;
+                    gameState = 'PAUSED';
+                    ui.pauseOverlay.style.display = 'flex';
+                }
+                // どの画面であっても非アクティブ時は音を止める
+                AudioSys.pauseBGM();
+            } else {
+                // アクティブに戻った時の処理
+                if (gameState === 'PAUSED') {
+                    // ポーズ画面が出ている場合（プレイ中だった場合）は、
+                    // タップされるまで待つのでここでは何もしない
+                } else {
+                    // ポーズ画面が出ていない状態（TITLE, OST, GAMEOVER）なら音を自動再開
                     AudioSys.resumeBGM();
                 }
             }
         }
 
-        // --- Event Listeners ---
-        document.addEventListener('visibilitychange', () => { if (document.hidden) setPaused(true); });
+        // --- Event Listeners (ここを差し替えてください) ---
+
+        // 画面の表示状態が変わった時（タブ切り替え、ホームに戻るなど）
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                setPaused(true);
+            } else {
+                setPaused(false);
+            }
+        });
+
+        // ウィンドウからフォーカスが外れた時（PCでの別窓操作など）
         window.addEventListener('blur', () => setPaused(true));
-        ui.pauseOverlay.addEventListener('click', () => setPaused(false));
-        ui.pauseOverlay.addEventListener('touchstart', (e) => { e.preventDefault(); setPaused(false); });
+
+        // ウィンドウにフォーカスが戻った時
+        window.addEventListener('focus', () => setPaused(false));
+
+        // ポーズ画面（オーバーレイ）をタップ・クリックして再開
+        // ※これは「PLAYING」中にポーズされた場合のみ必要
+        ui.pauseOverlay.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (gameState === 'PAUSED') {
+                gameState = 'PLAYING';
+                ui.pauseOverlay.style.display = 'none';
+                AudioSys.resumeBGM();
+            }
+        });
+
+        ui.pauseOverlay.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (gameState === 'PAUSED') {
+                gameState = 'PLAYING';
+                ui.pauseOverlay.style.display = 'none';
+                AudioSys.resumeBGM();
+            }
+        }, { passive: false });
+
 
         function handleTouch(e) {
             e.preventDefault();
