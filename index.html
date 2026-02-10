@@ -1087,13 +1087,22 @@
         }
 
         function damage(v) {
-            player.shield -= v; player.invuln = 5;
+            player.shield -= v;
+            player.invuln = 5;
             ui.shieldBar.style.width = Math.max(0, player.shield) + "%";
-            AudioSys.playSE('damage'); distortGrid(player.x, player.y, 50, 100);
+            AudioSys.playSE('damage');
+            distortGrid(player.x, player.y, 50, 100);
 
             if (player.shield <= 0) {
                 gameState = 'DYING';
                 dyingTimer = 120;
+
+                // --- 追加箇所: プレイヤーの攻撃オブジェクトを即座に消去 ---
+                bullets = [];  // 通常弾を消去
+                lasers = [];   // レーザーを消去
+                missiles = []; // サテライトから発射されたミサイルを消去
+                // -----------------------------------------------------
+
                 createExplosion(player.x, player.y, '#0f8', 100);
                 AudioSys.playSE('dragon_explode');
                 distortGrid(player.x, player.y, 100, 200);
