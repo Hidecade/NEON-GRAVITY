@@ -1005,25 +1005,25 @@
             // ST4: バランス型（岩は少なめ＝1つだけ入れる）
             4: ['triangle', 'triangle', 'tadpole', 'tadpole', 'dragon', 'dragon', 'asteroid'],
             // ST5: ★新敵 HUNTER 登場（岩少なめ）
-            5: ['triangle', 'tadpole', 'dragon', 'hunter', 'hunter', 'asteroid'],
+            5: ['triangle', 'tadpole', 'dragon', 'triangle', 'hunter', 'asteroid'],
             // ST6: HUNTERの比率を上げ、激戦化
-            6: ['triangle', 'tadpole', 'dragon', 'hunter', 'hunter', 'hunter', 'asteroid'],
+            6: ['triangle', 'tadpole', 'dragon', 'triangle', 'hunter', 'hunter', 'asteroid'],
             // ST7: 総力戦（全種均等に近いが、強い敵多め）
             7: ['triangle', 'tadpole', 'dragon', 'dragon', 'hunter', 'hunter', 'asteroid'],
             // ST8: ボス戦（取り巻きはHUNTERとDRAGONのみで圧力をかける）
-            8: ['hunter', 'dragon', 'asteroid', 'asteroid']
+            8: ['triangle', 'hunter', 'tadpole', 'dragon', 'asteroid', 'asteroid']
         };
 
         // --- ボスのバリエーション設定 ---
         const BOSS_VARIANTS = [
             { name: 'TRI-FORTRESS', sides: 3, color: '#f0f', hp: 100, bulletCount: 3, speedFactor: 1.5 }, // 高速
-            { name: 'DIAMOND-CORE', sides: 4, color: '#ffff00', hp: 120, bulletCount: 4, speedFactor: 1.3 },
+            { name: 'DIAMOND-CORE', sides: 4, color: '#ffff00', hp: 140, bulletCount: 4, speedFactor: 1.3 },
             { name: 'PENTA-BASE', sides: 5, color: '#0f8', hp: 140, bulletCount: 5, speedFactor: 1.1 },
             { name: 'HEXAGON-NEST', sides: 6, color: '#0cc', hp: 160, bulletCount: 6, speedFactor: 1.0 },
             { name: 'HEPTA-GATE', sides: 7, color: '#44f', hp: 180, bulletCount: 7, speedFactor: 0.9 },
             { name: 'OCTAGON-COMMAND', sides: 8, color: '#f40', hp: 200, bulletCount: 8, speedFactor: 0.8 },
             { name: 'NONA-REVEALER', sides: 9, color: '#f08', hp: 220, bulletCount: 9, speedFactor: 0.7 },
-            { name: 'DECA-DECIMATOR', sides: 10, color: '#fff', hp: 250, bulletCount: 10, speedFactor: 0.6 } // 超巨大・鈍重
+            { name: 'DECA-DECIMATOR', sides: 10, color: '#fff', hp: 300, bulletCount: 10, speedFactor: 0.6 } // 超巨大・鈍重
         ];
 
         // --- 当たり判定（半径）設定 ---
@@ -1503,7 +1503,7 @@
                     drop: 'none', // ドラゴン本体からは出さない（または任意の設定）
                     scale: 0.9, fireTimer: 0
                 });
-                const segmentCount = 12;
+                const segmentCount = 8;
                 for (let i = 0; i < segmentCount; i++) {
                     enemies[enemies.length - 1].segments.push({ x: x, y: y, angle: 0 });
                 }
@@ -1641,25 +1641,31 @@
                 const baseScale = size === 1 ? 1.8 : size === 2 ? 1.1 : 0.6;
                 const finalScale = baseScale * sizeFactor;
 
-                // moveSpeed には既に spd (SPEED_SCALE) が含まれています
                 const moveSpeed = (ENEMY_SPEEDS.ASTEROID * 0.7) * (1 + size * 0.4) * spd * stageMag;
-
                 const ang = Math.random() * Math.PI * 2;
 
                 enemies.push({
                     x, y,
-                    // ★修正：ここで moveSpeed を掛けて「移動ベクトル」にする
                     vx: Math.cos(ang) * moveSpeed,
                     vy: Math.sin(ang) * moveSpeed,
-
                     hp: hp,
                     speed: moveSpeed,
                     color: '#fff',
-                    type: 'asteroid', size: size, angle: Math.random() * Math.PI * 2,
-                    rotSpd: (Math.random() - 0.5) * 0.1, scale: finalScale,
-                    drop: 'none'
+                    type: 'asteroid',
+                    size: size,
+                    angle: Math.random() * Math.PI * 2,
+                    rotSpd: (Math.random() - 0.5) * 0.1,
+                    scale: finalScale,
+                    drop: 'none',
+
+                    // --- ★追加：追跡モード用パラメータ ---
+                    spawnTimer: 0,           // 経過フレーム
+                    trackingStart: 300 + Math.random() * 200, // 追跡開始までの時間（約5〜8秒）
+                    isTracking: false        // 追跡中フラグ
                 });
-                //spawnedCount++;
+
+                // アステロイドは出現数には含めるが撃破ノルマには含めない（前回の仕様維持）
+                // spawnedCount++; // ← 前回の修正で削除した場合はそのまま
             } else if (type === 'hunter') {
                 enemies.push({
                     x: x, y: y, vx: vx * 0.5, vy: vy * 0.5,
@@ -2584,16 +2590,64 @@
         }
 
         function updateAsteroidAI(e) {
-            // 等速直線運動
-            e.x += e.vx * e.speed;
-            e.y += e.vy * e.speed;
+            // 時間経過のカウント
+            e.spawnTimer = (e.spawnTimer || 0) + 1;
+
+            // --- 覚醒判定 ---
+            if (!e.isTracking && e.spawnTimer > e.trackingStart) {
+                e.isTracking = true;
+                e.color = '#ff8888'; // 赤く変色して危険を知らせる
+
+                // ★重要：物理計算の統合
+                // これまでは update で「vx * speed」と計算していましたが、
+                // 追跡モードでは「vx」自体を実際の速度として扱いたいため、
+                // ここで speed を vx, vy に焼き付けて speed を 1 にリセットします。
+                e.vx *= e.speed;
+                e.vy *= e.speed;
+                e.speed = 1;
+
+                // 回転を速くする（荒ぶる演出）
+                e.rotSpd *= 3;
+            }
+
+            if (e.isTracking) {
+                // --- 追跡モード（自機へ加速） ---
+                const dx = player.x - e.x;
+                const dy = player.y - e.y;
+                const dist = Math.hypot(dx, dy) || 0.001;
+
+                // 誘導性能（サイズが大きいほど鈍重に）
+                const accel = (0.15 / e.size) * SPEED_SCALE;
+
+                e.vx += (dx / dist) * accel;
+                e.vy += (dy / dist) * accel;
+
+                // 最高速度制限（漂流時の1.5倍まで加速可能）
+                // 元の moveSpeed は spawnEnemy で計算されているので、ここでは推定値でキャップをかけます
+                const maxSpeed = 8.0 * SPEED_SCALE;
+                const currentSpeed = Math.hypot(e.vx, e.vy);
+                if (currentSpeed > maxSpeed) {
+                    e.vx = (e.vx / currentSpeed) * maxSpeed;
+                    e.vy = (e.vy / currentSpeed) * maxSpeed;
+                }
+
+                // 移動
+                e.x += e.vx;
+                e.y += e.vy;
+
+            } else {
+                // --- 通常モード（漂流） ---
+                // 以前のロジック：e.vx * e.speed で移動
+                e.x += e.vx * e.speed;
+                e.y += e.vy * e.speed;
+
+                // 画面端の処理（漂流中のみループor反射）
+                if (e.x < 0 || e.x > worldSize) e.vx *= -1;
+                if (e.y < 0 || e.y > worldSize) e.vy *= -1;
+            }
 
             // 自転
             e.angle += e.rotSpd;
-
-            // 画面端で跳ね返るか、ループさせる（世界観に合わせて）
-            if (e.x < 0 || e.x > worldSize) e.vx *= -1;
-            if (e.y < 0 || e.y > worldSize) e.vy *= -1;
         }
 
         function applyAsteroidCollisions(e) {
@@ -4176,7 +4230,7 @@
             ctx.shadowColor = e.color;
 
             // --- 1. 胴体セグメントの描画 ---
-            const gapFactor = 1.7;
+            const gapFactor = 2;
 
             e.segments.forEach((s, i) => {
                 ctx.save();
@@ -4227,7 +4281,7 @@
             // リングの描画
             for (let k = 0; k < 3; k++) {
                 const rPos = k * 8;
-                const rSize = 22 - k * 4;
+                const rSize = 20 - k * 2;
                 ctx.beginPath();
                 ctx.ellipse(rPos, 0, 6, rSize, 0, 0, Math.PI * 2);
                 ctx.stroke();
