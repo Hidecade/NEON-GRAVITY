@@ -11,148 +11,188 @@
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&display=swap" rel="stylesheet">
 
     <style>
-        /* --- 基本レイアウト設定 --- */
+        /* =========================================================
+           1. グローバル基本設定
+           ========================================================= */
         body {
-            margin: 0;
-            background: #050505;
-            /* 真っ黒に近い背景でネオンを引き立てる */
-            overflow: hidden;
-            /* スクロールバーを隠す */
-            font-family: 'Orbitron', monospace;
-            /* 近未来的なフォントを採用 */
-            color: #fff;
-            user-select: none;
-            /* プレイ中にテキストが選択されるのを防ぐ */
-            -webkit-user-select: none;
-            touch-action: none;
-            /* スマホでのブラウザ標準ジェスチャーを無効化 */
-            -webkit-tap-highlight-color: transparent;
-            /* タップ時の青い枠を消す */
+            margin: 0; /* 余白を完全に除去 */
+            background: #050505; /* ネオン表現に最適な暗い背景 */
+            overflow: hidden; /* スクロールバーを非表示 */
+            font-family: 'Orbitron', monospace; /* 近未来風フォント */
+            color: #fff; /* 文字色の基本は白 */
+
+            user-select: none; /* テキスト選択を禁止 */
+            -webkit-user-select: none; /* iOS Safari向け */
+            touch-action: none; /* スマホの標準ジェスチャ無効化 */
+            -webkit-tap-highlight-color: transparent; /* タップ時の青枠を消す */
         }
 
-        /* ゲーム描画用のメインキャンバス */
+        /* =========================================================
+           2. キャンバスとメインUIコンテナ
+           ========================================================= */
         canvas {
-            display: block;
-            position: absolute;
+            display: block; /* 余計な隙間を防ぐ */
+            position: absolute; /* 画面全体に固定 */
             top: 0;
             left: 0;
-            z-index: 1;
-            /* 背景として配置 */
+            z-index: 1; /* UIより背面に配置 */
         }
 
-        /* UI全体のコンテナ（HUDやメッセージ） */
         #ui {
-            position: absolute;
+            position: absolute; /* ゲーム画面に重ねる */
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            pointer-events: none;
-            /* 下にあるジョイスティック等の操作を邪魔しない */
-            z-index: 20;
+            pointer-events: none; /* 操作を下の要素へ通す */
+            z-index: 20; /* キャンバスより前面 */
+
             display: flex;
-            flex-direction: column;
-            padding: 10px;
-            box-sizing: border-box;
+            flex-direction: column; /* 縦方向に要素配置 */
+            padding: 10px; /* 画面端からの余白 */
+            box-sizing: border-box; /* パディング込みサイズ */
         }
 
-        /* 上部の情報表示（スコア・ステージ・シールド等）を左右に分ける列 */
+
+        /* =========================================================
+           3. HUDレイアウト（スコア・ステージ・武器）
+           ========================================================= */
         .hud-row {
-            display: flex;
-            justify-content: space-between;
+            display: flex; /* 左右に要素を配置 */
+            justify-content: space-between; /* 両端に寄せる */
             width: 100%;
-            max-width: 800px;
-            margin: 0 auto;
+            max-width: 800px; /* 大画面での最大幅 */
+            margin: 0 auto; /* 中央寄せ */
         }
 
-        /* スコア表示：水色の発光エフェクト */
         #score-display {
-            font-size: 28px;
-            color: #0ff;
-            text-shadow: 0 0 10px #0ff;
-            /* ネオンのような光 */
-            letter-spacing: 2px;
+            font-size: 28px; /* 大きめに表示 */
+            color: #0ff; /* ネオン水色 */
+            text-shadow: 0 0 10px #0ff; /* 発光エフェクト */
+            letter-spacing: 2px; /* 数字の間隔 */
             margin-bottom: 5px;
         }
 
-        /* 補助テキスト（STAGE等のラベル） */
         .sub-text {
-            font-size: 12px;
-            color: #aaa;
+            font-size: 12px; /* 補助ラベル用の小文字 */
+            color: #aaa; /* 控えめな灰色 */
             font-weight: bold;
         }
 
-        /* ゲージ類（右側）のボックス */
-        #gauge-box {
-            width: 160px;
-            text-align: right;
-            pointer-events: auto;
-            /* ここだけは必要に応じてイベントを拾えるように設定 */
+        .hud-label {
+            font-size: 10px; /* ゲージ等の見出し */
+            color: #aaa;
+            display: block;
+            margin-bottom: -2px;
         }
 
-        /* ゲージのタイトルラベル */
+        #stage-num {
+            font-size: 28px; /* ステージ番号を強調 */
+            color: #fff;
+            font-weight: bold;
+            line-height: 1.0;
+            text-shadow: 0 0 10px rgba(255,255,255,0.5); /* 白の発光 */
+        }
+
+        /* =========================================================
+           4. ゲージ・バーコンポーネント
+           ========================================================= */
+        #gauge-box {
+            width: 160px; /* 右側ゲージ領域の幅 */
+            text-align: right;
+            pointer-events: auto; /* 必要に応じ操作可能 */
+        }
+
         .bar-label {
-            font-size: 10px;
-            color: #0ff;
+            font-size: 10px; /* ゲージ名の文字サイズ */
+            color: #0ff; /* 基本は水色 */
             display: block;
             margin-bottom: 2px;
         }
 
-        /* ゲージの外枠 */
         .bar-frame {
-            width: 100%;
+            width: 100%; /* ゲージの枠 */
             height: 12px;
             border: 1px solid #0ff;
-            background: rgba(0, 20, 40, 0.8);
+            background: rgba(0,20,40,0.8); /* 半透明の背景 */
             margin-bottom: 5px;
         }
 
-        /* シールドの中身：水色のバー */
+        /* --- シールドゲージ --- */
         #shield-bar {
-            width: 100%;
+            width: 100%; /* 残量によりJSで可変 */
             height: 100%;
             background: #0ff;
-            transition: width 0.1s;
-            /* 減少を滑らかに見せる */
+            transition: width 0.1s; /* 滑らかに減少 */
             box-shadow: 0 0 10px #0ff;
         }
 
-        /* シールド危険時：赤色の点滅アニメーション用 */
         .shield-critical {
-            animation: blink 0.2s infinite;
-            background: #f00 !important;
+            animation: blink 0.2s infinite; /* 点滅アニメ */
+            background: #f00 !important; /* 危険時は赤 */
         }
 
-        /* 敵軍勢ゲージ：赤色の配色 */
+        /* --- 敵ゲージ --- */
         .bar-label.enemy {
-            color: #f00;
+            color: #f00; /* 赤で表示 */
         }
 
         .bar-frame.enemy {
             border-color: #f00;
-            background: rgba(40, 0, 0, 0.8);
+            background: rgba(40,0,0,0.8);
         }
 
         #enemy-bar {
             width: 100%;
             height: 100%;
             background: #f00;
-            transition: width 0.5s;
+            transition: width 0.5s; /* ゆっくり変化 */
         }
 
-        /* 警告メッセージ（画面中央付近） */
+        /* --- レーザー持続時間ゲージ --- */
+        .laser-bar-frame {
+            width: 80px;
+            height: 8px;
+            border: 1px solid #0ff;
+            background: rgba(0,20,40,0.5);
+        }
+
+        .laser-bar-fill {
+            height: 100%;
+            background: #0ff;
+            box-shadow: 0 0 8px #0ff;
+        }
+
+        /* --- 武器レベル表示ブロック --- */
+        .w-block {
+            width: 12px;
+            height: 8px;
+            margin-right: 3px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid #444;
+            display: inline-block;
+        }
+
+            .w-block.active {
+                background: #0f0; /* レベルアップ時は緑 */
+                border-color: #0f0;
+                box-shadow: 0 0 5px #0f0;
+            }
+
+        /* =========================================================
+           5. ゲーム中メッセージ
+           ========================================================= */
         #warning-msg {
-            display: none;
+            display: none; /* 初期は非表示 */
             position: absolute;
             top: 20%;
             width: 100%;
             text-align: center;
             color: #f00;
             font-size: 24px;
-            animation: blink 0.2s infinite;
+            animation: blink 0.2s infinite; /* 点滅警告 */
         }
 
-        /* ステージクリア等の大型メッセージ */
         #stage-msg {
             display: none;
             position: absolute;
@@ -164,93 +204,47 @@
             text-shadow: 0 0 20px #0ff;
         }
 
-        /* --- 新しいHUD（ステージ番号・武器レベル） --- */
-        .hud-label {
-            font-size: 10px;
-            color: #aaa;
-            display: block;
-            margin-bottom: -2px;
-        }
-
-        /* ステージ番号：大きく強調 */
-        #stage-num {
-            font-size: 28px;
-            color: #fff;
-            font-weight: bold;
-            line-height: 1.0;
-            text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
-        }
-
-        /* 武器レベルのブロック（通常時） */
-        .w-block {
-            width: 12px;
-            height: 8px;
-            margin-right: 3px;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid #444;
-            display: inline-block;
-        }
-
-            /* レベルアップした時に付与されるクラス：緑色の発光 */
-            .w-block.active {
-                background: #0f0;
-                border-color: #0f0;
-                box-shadow: 0 0 5px #0f0;
-            }
-
-        /* レーザー装備時の持続時間バー */
-        .laser-bar-frame {
-            width: 80px;
-            height: 8px;
-            border: 1px solid #0ff;
-            background: rgba(0, 20, 40, 0.5);
-        }
-
-        .laser-bar-fill {
-            height: 100%;
-            background: #0ff;
-            box-shadow: 0 0 8px #0ff;
-        }
-
-        /* タイトル画面やリトライ画面の全画面オーバーレイ */
+        /* =========================================================
+           6. オーバーレイ（タイトル・ポーズ）
+           ========================================================= */
         #overlay {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.85);
-            /* 半透明の黒でゲーム画面を暗くする */
+            background: rgba(0,0,0,0.85); /* 半透明の暗幕 */
+
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
             z-index: 100;
-            pointer-events: auto;
-            /* UI背面を触れないようにする */
+            pointer-events: auto; /* 操作を受け付ける */
         }
 
-        /* ポーズ画面：ぼかしエフェクト付き */
         #pause-overlay {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.7);
-            display: none;
+            background: rgba(0,0,0,0.7);
+            display: none; /* ポーズ時のみ表示 */
             flex-direction: column;
             justify-content: center;
             align-items: center;
             z-index: 105;
             pointer-events: auto;
-            backdrop-filter: blur(5px);
-            /* 背景をボケさせる */
+            backdrop-filter: blur(5px); /* 背景ぼかし */
         }
 
-        /* メニューボタン（START GAME等）のデザイン */
+
+        /* =========================================================
+           7. 共通メニューボタン
+           ========================================================= */
         .menu-btn {
-            background: rgba(0, 255, 255, 0.1);
+            background: rgba(0,255,255,0.1); /* 半透明ネオン背景 */
             border: 1px solid #0ff;
             color: #0ff;
             padding: 10px 30px;
@@ -260,20 +254,23 @@
             cursor: pointer;
             min-width: 240px;
             text-align: center;
-            box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
+            box-shadow: 0 0 15px rgba(0,255,255,0.3);
         }
 
-            /* ボタンクリック/タップ時の押し込み演出 */
             .menu-btn:active {
-                background: #0ff;
+                background: #0ff; /* 押下時に反転 */
                 color: #000;
                 transform: scale(0.95);
             }
 
-        /* サウンドトラック画面 */
+
+        /* =========================================================
+           8. OST（サウンドトラック画面）
+           ========================================================= */
         #ost-ui {
-            display: none;
-            position: absolute;
+            display: none; /* 初期は非表示 */
+
+            position: fixed; /* 全画面固定 */
             top: 0;
             left: 0;
             width: 100%;
@@ -283,26 +280,43 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
+            padding: 10px;
+            box-sizing: border-box;
             pointer-events: auto;
         }
 
-        /* 楽曲リストの項目 */
+        #ost-scroll-container {
+            width: 90%;
+            max-width: 500px;
+            max-height: 60vh; /* 画面高さの60% */
+
+            overflow-y: auto; /* スクロール可能 */
+            margin: 10px 0;
+            -webkit-overflow-scrolling: touch;
+        }
+
         .track-item {
-            padding: 20px;
-            width: 80%;
+            padding: 15px 20px;
+            width: 100%;
             border-bottom: 1px solid #333;
             color: #888;
             text-align: center;
-            font-size: 18px;
+            font-size: 16px;
+            box-sizing: border-box;
+            cursor: pointer;
         }
 
-            /* 現在再生中の楽曲：水色で強調 */
             .track-item.playing {
                 color: #0ff;
                 border-color: #0ff;
+                text-shadow: 0 0 10px #0ff;
+                background: rgba(0,255,255,0.05);
             }
 
-        /* 操作パネル（ジョイスティック等） */
+
+        /* =========================================================
+           9. 操作コントローラー（ジョイスティック）
+           ========================================================= */
         #controls {
             position: absolute;
             top: 0;
@@ -315,91 +329,153 @@
             pointer-events: auto;
         }
 
-        /* ジョイスティックの外枠（円） */
+        /* ジョイスティックの外枠（ベース） */
         .joystick-area {
             position: absolute;
-            width: 120px;
-            height: 120px;
+            width: 140px; /* 少し大きく */
+            height: 140px;
             border-radius: 50%;
-            border: 2px solid rgba(255, 255, 255, 0.2);
-            background: rgba(255, 255, 255, 0.05);
+            /* ネオンブルーの二重円エフェクト */
+            border: 1px solid rgba(0, 255, 255, 0.3);
+            background: radial-gradient(circle, rgba(0, 255, 255, 0.05) 0%, rgba(0, 0, 0, 0.2) 70%);
+            box-shadow: 0 0 15px rgba(0, 255, 255, 0.1), inset 0 0 10px rgba(0, 255, 255, 0.1);
             display: flex;
             justify-content: center;
             align-items: center;
             pointer-events: none;
         }
 
-        /* 実際に動かすスティック部分（つまみ） */
-        .knob {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            background: rgba(255, 255, 255, 0.5);
-            position: absolute;
-            transform: translate(0, 0);
-            transition: transform 0.05s;
-            /* 指の動きに滑らかに追従 */
-        }
+            /* 外枠内の十字目盛り */
+            .joystick-area::before {
+                content: '';
+                position: absolute;
+                width: 100%;
+                height: 1px;
+                background: linear-gradient(90deg, transparent, rgba(0, 255, 255, 0.2), transparent);
+            }
 
-        /* 特殊攻撃（ボム）ボタン：黄色のネオン */
-        #launch-btn {
-            position: absolute;
+            .joystick-area::after {
+                content: '';
+                position: absolute;
+                width: 1px;
+                height: 100%;
+                background: linear-gradient(180deg, transparent, rgba(0, 255, 255, 0.2), transparent);
+            }
+
+        /* スティックのつまみ */
+        .knob {
             width: 60px;
             height: 60px;
             border-radius: 50%;
-            background: rgba(255, 255, 0, 0.15);
+            background: rgba(0, 255, 255, 0.15);
+            border: 2px solid #0ff;
+            position: absolute;
+            transform: translate(0,0);
+            transition: transform 0.05s;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.4);
+            z-index: 2;
+        }
+
+            /* つまみの中心のドット */
+            .knob::after {
+                content: '';
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                width: 12px;
+                height: 12px;
+                background: #fff;
+                border-radius: 50%;
+                transform: translate(-50%, -50%);
+                box-shadow: 0 0 10px #fff;
+            }
+
+        /* 特殊攻撃（BOMB）ボタン */
+        #launch-btn {
+            position: absolute;
+            width: 80px; /* サイズアップ */
+            height: 80px;
+            border-radius: 50%;
+            background: rgba(255, 255, 0, 0.1);
             border: 2px solid #ff0;
             color: #ff0;
+            font-family: 'Orbitron';
             font-weight: bold;
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
-            font-size: 10px;
-            box-shadow: 0 0 10px #ff0;
+            font-size: 11px;
+            letter-spacing: 1px;
+            box-shadow: 0 0 15px rgba(255, 255, 0, 0.3), inset 0 0 10px rgba(255, 255, 0, 0.2);
             pointer-events: auto;
+            text-shadow: 0 0 5px #ff0;
         }
 
-            /* ボムボタン使用時のフィードバック */
-            #launch-btn.active {
-                background: #ff0;
-                color: #000;
-                transform: scale(0.9);
+            /* BOMBボタンの装飾リング */
+            #launch-btn::before {
+                content: '';
+                position: absolute;
+                width: 90px;
+                height: 90px;
+                border: 1px dashed rgba(255, 255, 0, 0.4);
+                border-radius: 50%;
+                animation: rotate 4s linear infinite;
             }
 
-        /* 共通アニメーション：0.2秒ごとに不透明度を半分にする点滅 */
-        @keyframes blink {
-            50% {
-                opacity: 0.5;
+        @keyframes rotate {
+            from {
+                transform: rotate(0deg);
+            }
+
+            to {
+                transform: rotate(360deg);
             }
         }
 
-        /* ランキング画面：スクロール対応とレイアウト修正 */
+        /* ボタン使用時のフィードバック */
+        #launch-btn.active {
+            background: #ff0;
+            color: #000;
+            transform: scale(0.85);
+            box-shadow: 0 0 30px #ff0;
+            text-shadow: none;
+        }
+
+        /* =========================================================
+           10. ランキング画面
+           ========================================================= */
         #ranking-overlay {
             display: none;
-            position: fixed; /* absoluteから変更 */
+            position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.95);
+            background: rgba(0,0,0,0.95);
             z-index: 1000;
             flex-direction: column;
             align-items: center;
-            padding: 5px;
+            justify-content: center;
+            padding: 10px;
             box-sizing: border-box;
         }
 
-        /* テーブルを表示エリア内でスクロール可能にする */
-        #ranking-table {
+        #ranking-scroll-container {
             width: 95%;
             max-width: 600px;
+            max-height: 60vh;
+            overflow-y: auto;
+            margin: 10px 0;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        #ranking-table {
+            width: 100%;
             border-collapse: collapse;
             color: #fff;
             font-family: 'Orbitron';
             font-size: 14px;
-            margin-top: 10px;
-            margin-bottom: 5px;
-            overflow-y: auto; /* 縦に長くなったらスクロール */
         }
 
             #ranking-table th {
@@ -413,7 +489,6 @@
                 padding: 8px 10px;
             }
 
-        /* 順位ごとの色 */
         .rank-1 {
             color: #ffd700;
             text-shadow: 0 0 10px #ffd700;
@@ -421,23 +496,22 @@
             font-size: 1.2em;
         }
 
-        /* 金 */
         .rank-2 {
             color: #c0c0c0;
             text-shadow: 0 0 10px #c0c0c0;
             font-weight: bold;
         }
 
-        /* 銀 */
         .rank-3 {
             color: #cd7f32;
             text-shadow: 0 0 10px #cd7f32;
             font-weight: bold;
         }
 
-        /* 銅 */
 
-        /* 名前入力エリア */
+        /* =========================================================
+           11. 名前入力画面
+           ========================================================= */
         #name-input-area {
             display: none;
             flex-direction: column;
@@ -449,7 +523,7 @@
         }
 
         #player-name-input {
-            background: rgba(0, 0, 0, 0.8);
+            background: rgba(0,0,0,0.8);
             border: 2px solid #0ff;
             color: #fff;
             font-family: 'Orbitron';
@@ -466,7 +540,10 @@
                 color: #055;
             }
 
-        /* エンディング画面 (全画面・黒背景) */
+
+        /* =========================================================
+           12. エンディング画面
+           ========================================================= */
         #ending-msg {
             display: none;
             position: fixed;
@@ -474,7 +551,7 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.9); /* 背景をしっかり暗くする */
+            background: rgba(0,0,0,0.9);
             z-index: 200;
             flex-direction: column;
             justify-content: center;
@@ -483,23 +560,24 @@
             text-align: center;
         }
 
-            /* エンディング画面内の各要素の間隔を調整 */
-            #ending-msg h1 {
-                margin-bottom: 10px;
-            }
-
-            #ending-msg p {
-                margin-bottom: 20px;
-            }
-
-        /* スコア表示の強調 */
         #final-score-val {
-            background: rgba(0, 255, 255, 0.1);
+            background: rgba(0,255,255,0.1);
             padding: 10px 30px;
-            border-top: 1px solid rgba(0, 255, 255, 0.3);
-            border-bottom: 1px solid rgba(0, 255, 255, 0.3);
+            border-top: 1px solid rgba(0,255,255,0.3);
+            border-bottom: 1px solid rgba(0,255,255,0.3);
             margin-bottom: 30px;
         }
+
+
+        /* =========================================================
+           13. アニメーション定義
+           ========================================================= */
+        @keyframes blink {
+            50% {
+                opacity: 0.5; /* 半透明にして点滅 */
+            }
+        }
+
     </style>
 
 </head>
@@ -591,17 +669,21 @@
     <div id="ranking-overlay">
         <h1 style="color:#0ff; text-shadow:0 0 20px #0ff; margin-bottom: 2px;">TOP COMMANDERS</h1>
         <div id="loading-ranking" style="color:#0ff; animation: blink 0.5s infinite;">CONNECTING...</div>
-        <table id="ranking-table" style="display:none;">
-            <thead>
-                <tr>
-                    <th style="width:50px;">RANK</th>
-                    <th style="text-align:left;">NAME</th>
-                    <th>STAGE</th>
-                    <th style="text-align:right;">SCORE</th>
-                </tr>
-            </thead>
-            <tbody id="ranking-list-body"></tbody>
-        </table>
+
+        <div id="ranking-scroll-container">
+            <table id="ranking-table">
+                <thead>
+                    <tr>
+                        <th style="width:50px;">RANK</th>
+                        <th style="text-align:left;">NAME</th>
+                        <th>STAGE</th>
+                        <th style="text-align:right;">SCORE</th>
+                    </tr>
+                </thead>
+                <tbody id="ranking-list-body"></tbody>
+            </table>
+        </div>
+
         <div class="menu-btn" id="close-ranking-btn">CLOSE</div>
     </div>
 
@@ -611,8 +693,12 @@
     </div>
 
     <div id="ost-ui">
-        <h2 style="color:#0ff;">SOUNDTRACK</h2>
-        <div id="track-list" style="width:100%; display:flex; flex-direction:column; align-items:center;"></div>
+        <h2 style="color:#0ff; text-shadow:0 0 20px #0ff; margin-bottom: 5px;">SOUNDTRACK</h2>
+
+        <div id="ost-scroll-container">
+            <div id="track-list"></div>
+        </div>
+
         <div class="menu-btn" id="btn-back" style="margin-top:20px;">BACK</div>
     </div>
 
@@ -683,11 +769,11 @@
                         const stageVal = data.stage ? "ST." + data.stage : "-";
 
                         tr.innerHTML = `
-                                <td class="${rankClass}" style="text-align:center;">${rankText}</td>
-                                <td style="text-align:left;">${escapeHtml(data.name)}</td>
-                                <td style="color:#aaa; text-align:center;">${stageVal}</td>
-                                <td style="text-align:right; color:#0ff;">${data.score.toLocaleString()}</td>
-                            `;
+                                    <td class="${rankClass}" style="text-align:center;">${rankText}</td>
+                                    <td style="text-align:left;">${escapeHtml(data.name)}</td>
+                                    <td style="color:#aaa; text-align:center;">${stageVal}</td>
+                                    <td style="text-align:right; color:#0ff;">${data.score.toLocaleString()}</td>
+                                `;
                         rankingBody.appendChild(tr);
                         rank++;
                     });
@@ -765,7 +851,7 @@
         // 通常ショットの最大強化レベル（1〜7）
         const MAX_WEAPON_LEVEL = 7; // 最大を7に変更
 
-        const MAX_STAGE = 1;
+        const MAX_STAGE = 8;
 
         // 背景グリッド線の間隔（小さいほど網目が細かくなる）
         const GRID_SPACING = 25;
