@@ -280,7 +280,7 @@
             border: 1px solid #0ff;
             color: #0ff;
             padding: 10px 30px;
-            margin: 10px;
+            margin: 8px;
             font-size: 22px;
             font-family: 'Orbitron';
             cursor: pointer;
@@ -745,9 +745,9 @@
         </div>
     </div>
 
-    <div id="overlay" style="display:flex;">
+    <div id="overlay">
         <h1 id="menu-title"
-            style="color:#0ff; font-size:40px; margin-bottom:40px; text-shadow:0 0 20px #0ff; text-align:center;">
+            style="color:#0ff; font-size:36px; margin-bottom:10px; text-shadow:0 0 20px #0ff; text-align:center;">
             NEON GRAVITY<br><span style="font-size:20px;color:#fff;">ORBITAL</span>
         </h1>
 
@@ -2546,7 +2546,7 @@
                     return; // この弾の以降の処理（当たり判定等）をスキップ
                 }
 
-                // --- ミサイルの挙動制御 (既存ロジック) ---
+                // ミサイルの挙動制御 
                 if (eb.isMissile && eb.life > 0) {
                     // 初速の減衰
                     eb.vx *= 0.96;
