@@ -1534,31 +1534,32 @@
                 const form = forms[Math.floor(Math.random() * forms.length)];
                 const initialAngle = Math.atan2(vy, vx);
 
-                // --- ★追加：フォーメーションの種類（色）を決定 ---
                 const formationTypes = ['blue', 'purple', 'yellow'];
                 const currentFormationType = formationTypes[Math.floor(Math.random() * formationTypes.length)];
 
-                // 色定数の定義
                 const colorMap = {
                     blue: '#00f0ff',
                     purple: '#bf00ff',
-                    yellow: '#00aaff'
+                    yellow: '#ffdf00' // 黄色を修正
                 };
                 const selectedColor = colorMap[currentFormationType];
 
-                // リーダーの生成
+                // --- 1. リーダーの生成 ---
                 const leader = {
                     x: x, y: y, vx: vx, vy: vy,
                     hp: 1 + Math.floor(hpMag * 0.5),
                     speed: ENEMY_SPEEDS.TRIANGLE * spd * stageMag,
-                    color: selectedColor, // 決定された色を適用
+                    color: selectedColor,
                     type: 'triangle',
-                    formationType: currentFormationType, // draw関数で使う識別子
+                    formationType: currentFormationType,
                     angle: initialAngle,
                     drop: dropType,
-                    scale: 0.7,
+                    scale: 0.1, // 出現時は小さく
                     isLeader: true,
                     followers: [],
+                    // ★出現演出用フラグ
+                    isWarping: true,
+                    warpPercent: 0,
                     rotX: Math.random() * Math.PI,
                     rotY: Math.random() * Math.PI,
                     rotZ: Math.random() * Math.PI
@@ -1566,7 +1567,7 @@
                 enemies.push(leader);
                 spawnedCount++;
 
-                // 取り巻きの生成
+                // --- 2. 取り巻きの生成 ---
                 for (let i = 1; i <= 4; i++) {
                     if (spawnedCount >= enemiesToSpawn) break;
 
@@ -1582,21 +1583,24 @@
                         offY = Math.sin(a) * 40;
                     }
 
-                    const rx = offX * Math.cos(initialAngle) - offY * Math.sin(initialAngle);
-                    const ry = offX * Math.sin(initialAngle) + offY * Math.cos(initialAngle);
-
+                    // ★修正ポイント：初期座標はリーダーと同じ(x, y)にする
                     enemies.push({
-                        x: x + rx, y: y + ry, vx, vy,
+                        x: x,
+                        y: y,
+                        vx, vy,
                         hp: 1,
                         speed: ENEMY_SPEEDS.TRIANGLE * spd * stageMag,
-                        color: selectedColor, // リーダーと同じ色を適用
+                        color: selectedColor,
                         type: 'triangle',
-                        formationType: currentFormationType, // 取り巻きにも持たせる
+                        formationType: currentFormationType,
                         angle: initialAngle,
                         drop: 'none',
-                        scale: 0.7,
+                        scale: 0.1, // 出現時は小さく
                         leader: leader,
                         formOffset: { x: offX, y: offY },
+                        // ★出現演出用フラグ
+                        isWarping: true,
+                        warpPercent: 0,
                         rotX: Math.random() * Math.PI,
                         rotY: Math.random() * Math.PI,
                         rotZ: Math.random() * Math.PI
@@ -2207,15 +2211,21 @@
 
         function updateEnemies() {
             enemies.forEach(e => {
-                // --- 移動・AI更新 ---
-                if (e.leader && e.leader.hp > 0) {
+                // --- ★修正ポイント ---
+                // Triangle型は独自のAI（updateTriangleAI）でフォーメーション制御を行うため、
+                // ここの汎用フォーメーション処理（updateFormationMovement）はスキップさせる。
+                const isTriangle = (e.type === 'triangle');
+
+                if (!isTriangle && e.leader && e.leader.hp > 0) {
                     updateFormationMovement(e);
-                    if (e.type === 'triangle') { e.rotX += 0.08; e.rotY += 0.12; e.rotZ += 0.05; }
+                    // Triangle以外で回転が必要な場合の処理（もしあれば）
+                    if (e.type === 'cube') { e.rotX += 0.03; e.rotY += 0.04; }
                 } else {
+                    // Triangleはリーダー/副機に関わらずこちら（switch文）を実行
                     switch (e.type) {
                         case 'dragon': updateDragonAI(e); break;
                         case 'tadpole': updateTadpoleAI(e); break;
-                        case 'triangle': updateTriangleAI(e); break;
+                        case 'triangle': updateTriangleAI(e); break; // ★ここで副機も処理されるようになる
                         case 'cube': updateCubeAI(e); break;
                         case 'boss': updateBossAI(e); break;
                         case 'asteroid': updateAsteroidAI(e); break;
@@ -2232,17 +2242,13 @@
 
                 // --- 破壊判定 ---
                 if (e.hp <= 0) {
-                    // ★アステロイド専用：分裂ロジック
+                    // アステロイド分裂処理
                     if (e.type === 'asteroid' && e.size < 3) {
-                        // 分裂する破片の数（2つに分かれる）
                         for (let i = 0; i < 2; i++) {
-                            // 分裂時は少し勢いよく外側へ飛ばす
                             const splitAngle = Math.random() * Math.PI * 2;
                             const splitSpeed = 2.0;
                             const vx = Math.cos(splitAngle) * splitSpeed;
                             const vy = Math.sin(splitAngle) * splitSpeed;
-
-                            // 次のサイズ(e.size + 1)を指定してスポーン
                             spawnEnemy(e.x, e.y, 'asteroid', e.size + 1);
                         }
                     }
@@ -2309,10 +2315,70 @@
         }
 
         function updateTriangleAI(e) {
-            const dx = player.x - e.x, dy = player.y - e.y, d = Math.hypot(dx, dy) || 0.001;
-            e.vx += (dx / d) * 0.2 * SPEED_SCALE; e.vy += (dy / d) * 0.2 * SPEED_SCALE;
-            const cv = Math.hypot(e.vx, e.vy); if (cv > e.speed) { e.vx = (e.vx / cv) * e.speed; e.vy = (e.vy / cv) * e.speed; }
-            e.x += e.vx; e.y += e.vy; e.angle = Math.atan2(e.vy, e.vx); e.rotX += 0.08; e.rotY += 0.12; e.rotZ += 0.05;
+            // --- 1. 出現・展開アニメーション (全員共通) ---
+            if (e.isWarping) {
+                e.warpPercent = (e.warpPercent || 0) + 0.015;
+
+                if (e.warpPercent >= 1) {
+                    e.warpPercent = 1;
+                    e.isWarping = false;
+                    e.scale = 0.7;
+                } else {
+                    e.scale = 0.1 + 0.6 * e.warpPercent;
+                }
+            }
+
+            // --- 2. 座標と移動の計算 ---
+            if (!e.isLeader && e.leader && e.leader.hp > 0) {
+                // 【副機】リーダーの位置を基準に動く
+                const angle = e.leader.angle || 0;
+
+                const targetRx = e.formOffset.x * Math.cos(angle) - e.formOffset.y * Math.sin(angle);
+                const targetRy = e.formOffset.x * Math.sin(angle) + e.formOffset.y * Math.cos(angle);
+
+                // 点から広がる動き
+                const ratio = e.isWarping ? e.warpPercent : 1.0;
+
+                e.x = e.leader.x + targetRx * ratio;
+                e.y = e.leader.y + targetRy * ratio;
+                e.angle = angle;
+
+                e.vx = e.leader.vx;
+                e.vy = e.leader.vy;
+
+            } else {
+                // 【リーダー機】
+
+                // ★修正ポイント：出現中(isWarping)は動かないようにする
+                if (e.isWarping) {
+                    // 強いブレーキをかけて穴の中心に留める
+                    e.vx *= 0.5;
+                    e.vy *= 0.5;
+                    // ※完全に停止させたい場合は e.vx = 0; e.vy = 0; にしてください
+                } else {
+                    // 出現完了後のみ、プレイヤーを追跡開始
+                    const dx = player.x - e.x, dy = player.y - e.y;
+                    const d = Math.hypot(dx, dy) || 0.001;
+
+                    e.vx += (dx / d) * 0.2 * SPEED_SCALE;
+                    e.vy += (dy / d) * 0.2 * SPEED_SCALE;
+                }
+
+                // 速度制限
+                const cv = Math.hypot(e.vx, e.vy);
+                if (cv > e.speed) {
+                    e.vx = (e.vx / cv) * e.speed;
+                    e.vy = (e.vy / cv) * e.speed;
+                }
+                e.x += e.vx;
+                e.y += e.vy;
+                e.angle = Math.atan2(e.vy, e.vx);
+            }
+
+            // --- 3. 3D回転演出 ---
+            e.rotX += 0.08;
+            e.rotY += 0.12;
+            e.rotZ += 0.05;
         }
 
         function updateCubeAI(e) {
@@ -3361,12 +3427,24 @@
             });
 
             enemies.forEach(e => {
+                ctx.save(); // 個別にsave/restoreすることで透明度の影響を防ぐ
+
+                // 出現演出中の透明度を適用
+                if (e.isWarping) {
+                    ctx.globalAlpha = e.warpPercent || 0;
+                } else {
+                    ctx.globalAlpha = 1.0;
+                }
+
                 if (e.type === 'dragon') drawDragonEnemy(ctx, e);
                 else if (e.type === 'triangle') drawTriangleEnemy(ctx, e);
                 else if (e.type === 'cube') drawCubeEnemy(ctx, e);
                 else if (e.type === 'tadpole') drawTadpoleEnemy(ctx, e);
                 else if (e.type === 'boss') drawBossEnemy(ctx, e);
-                else if (e.type === 'asteroid') drawAsteroidEnemy(ctx, e); else if (e.type === 'hunter') drawHunterEnemy(ctx, e);
+                else if (e.type === 'asteroid') drawAsteroidEnemy(ctx, e);
+                else if (e.type === 'hunter') drawHunterEnemy(ctx, e);
+
+                ctx.restore();
             });
 
             // 敵の弾の描画ループ
@@ -3566,15 +3644,84 @@
         }
 
         function drawTriangleEnemy(ctx, e) {
-            ctx.save(); ctx.translate(e.x, e.y); ctx.scale(e.scale * G_SCALE, e.scale * G_SCALE);
-            ctx.globalCompositeOperation = 'lighter'; ctx.strokeStyle = e.color; ctx.lineWidth = 2.5; ctx.shadowBlur = 25; ctx.shadowColor = e.color;
-            const size = 15; const pts = [{ x: 1, y: 1, z: 1 }, { x: -1, y: -1, z: 1 }, { x: -1, y: 1, z: -1 }, { x: 1, y: -1, z: -1 }];
-            const cosX = Math.cos(e.rotX), sinX = Math.sin(e.rotX); const cosY = Math.cos(e.rotY), sinY = Math.sin(e.rotY); const cosZ = Math.cos(e.rotZ), sinZ = Math.sin(e.rotZ);
-            const proj = pts.map(p => { let y1 = p.y * cosX - p.z * sinX; let z1 = p.y * sinX + p.z * cosX; let x2 = p.x * cosY + z1 * sinY; let z2 = -p.x * sinY + z1 * cosY; let x3 = x2 * cosZ - y1 * sinZ; let y3 = x2 * sinZ + y1 * cosZ; return { x: x3 * size, y: y3 * size }; });
+            // セーフガード: 万が一数値が異常な場合は描画をスキップ
+            if (!e || typeof e.x !== 'number' || isNaN(e.x)) return;
+
+            ctx.save();
+
+            // --- 1. 座標とスケールの設定 ---
+            ctx.translate(e.x, e.y);
+
+            // 出現完了後は e.scale (0.7) に固定、出現中は 0.1 ～ 0.7 へ変化
+            const currentScale = (e.scale || 0.7) * G_SCALE;
+            ctx.scale(currentScale, currentScale);
+
+            // --- 2. 出現演出用の透明度とグロー設定 ---
+            // Warping中のみ warpPercent に依存させ、それ以外は不透明(1.0)にする
+            const visualAlpha = e.isWarping ? (e.warpPercent || 0) : 1.0;
+            ctx.globalAlpha = visualAlpha;
+
+            // --- 3. ネオンカラー設定 ---
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.strokeStyle = e.color || '#0ff';
+            ctx.lineWidth = 3.5;
+
+            // グロー効果（出現中は控えめから徐々に強く）
+            ctx.shadowBlur = e.isWarping ? (5 + visualAlpha * 20) : 25;
+            ctx.shadowColor = e.color || '#0ff';
+
+            // --- 4. 3D形状（正四面体：テトラヒドロン）の計算 ---
+            const size = 15;
+            const pts = [
+                { x: 1, y: 1, z: 1 },
+                { x: -1, y: -1, z: 1 },
+                { x: -1, y: 1, z: -1 },
+                { x: 1, y: -1, z: -1 }
+            ];
+
+            // 回転速度の適用（e.rotX 等が更新されている前提）
+            const cosX = Math.cos(e.rotX || 0), sinX = Math.sin(e.rotX || 0);
+            const cosY = Math.cos(e.rotY || 0), sinY = Math.sin(e.rotY || 0);
+            const cosZ = Math.cos(e.rotZ || 0), sinZ = Math.sin(e.rotZ || 0);
+
+            const proj = pts.map(p => {
+                // 3D回転行列計算
+                let y1 = p.y * cosX - p.z * sinX;
+                let z1 = p.y * sinX + p.z * cosX;
+                let x2 = p.x * cosY + z1 * sinY;
+                let z2 = -p.x * sinY + z1 * cosY;
+                let x3 = x2 * cosZ - y1 * sinZ;
+                let y3 = x2 * sinZ + y1 * cosZ;
+                return { x: x3 * size, y: y3 * size };
+            });
+
             const lines = [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]];
-            ctx.beginPath(); lines.forEach(l => { ctx.moveTo(proj[l[0]].x, proj[l[0]].y); ctx.lineTo(proj[l[1]].x, proj[l[1]].y); }); ctx.stroke();
-            ctx.shadowBlur = 35; ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI * 2); ctx.fill();
+
+            // 外殻ワイヤーフレームの描画
+            ctx.beginPath();
+            lines.forEach(l => {
+                ctx.moveTo(proj[l[0]].x, proj[l[0]].y);
+                ctx.lineTo(proj[l[1]].x, proj[l[1]].y);
+            });
+            ctx.stroke();
+
+            // --- 5. 中心の白いコア ---
+            // コア自体に個別の透明度設定を上書きしないよう、save/restore内で計算
+            ctx.save();
+            // コアは本体よりも少しだけ明るく強調
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = "#fff";
+            ctx.fillStyle = "#fff";
+            // globalAlphaは親（visualAlpha）を引き継ぐ
+            ctx.beginPath();
+            ctx.arc(0, 0, 3, 0, Math.PI * 2);
+            ctx.fill();
             ctx.restore();
+
+            ctx.restore();
+
+            // globalCompositeOperationを元に戻す（重要）
+            ctx.globalCompositeOperation = 'source-over';
         }
 
         function drawCubeEnemy(ctx, e) {
