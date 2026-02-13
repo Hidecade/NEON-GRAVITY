@@ -1,6 +1,6 @@
-# NEON GRAVITY: DEBUGGED
+# NEON GRAVITY
 
-**NEON GRAVITY: DEBUGGED** は、重力と幾何学が交差する、高密度な全方位シューティングゲームです。
+**NEON GRAVITY　重力と幾何学が交差する、高密度な全方位シューティングゲームです。
 漆黒のワームホールによる空間の歪み、ネオンに輝くベクターグラフィックス、そして独自の「サテライト・システム」を駆使して、無限に湧き出る敵を殲滅してください。
 
 [👉 **Play Now (ブラウザで遊ぶ)**](https://hidecade.github.io/Neon-Gravity/)
