@@ -13,8 +13,8 @@
 
     <style>
         /* =========================================================
-                1. グローバル基本設定
-                ========================================================= */
+            1. グローバル基本設定
+            ========================================================= */
         body {
             margin: 0; /* 余白を完全に除去 */
             background: #050505; /* ネオン表現に最適な暗い背景 */
@@ -976,7 +976,6 @@
             HUNTER: 7,
             HUNTER_ROT: 3,  // 接近時の回転速度
             ASTEROID: 3.5,  // 白：分裂する岩、慣性移動（★追加）
-            BOSS_MISSILE: 24, // ★追加：ホーミング弾の最高速度
         };
 
         // ドラゴンがプレイヤーを追尾する際の加速力（旋回性能に影響）
@@ -993,11 +992,25 @@
             240, // Stage 7
             300  // Stage 8 (Final)
         ];
+
+        // --- ★追加：画面内に同時に存在できる敵の最大数（ステージ別） ---
+        // 設定値を超えている間は、新しいワームホール（敵の出現口）が発生しなくなります
+        const STAGE_MAX_ON_SCREEN = [
+            10,   // Stage 1: チュートリアル的に少なめ
+            15,  // Stage 2
+            30,  // Stage 3
+            30,  // Stage 4
+            35,  // Stage 5
+            40,  // Stage 6
+            45,  // Stage 7
+            50   // Stage 8: 激戦
+        ];
+
         // --- STAGE_ENEMIES 定義 ---
         // Cube（アイテム）は別途15%で出現するため、ここには書きません
         const STAGE_ENEMIES = {
             // ST1: 基本の突撃敵と、少し速い敵
-            1: ['triangle', 'triangle', 'triangle', 'dragon'],
+            1: ['triangle', 'dragon', 'triangle', 'dragon'],
             // ST2: 弾を撃つドラゴンを追加
             2: ['triangle', 'triangle', 'tadpole', 'dragon'],
             // ST3: 岩石地帯（岩多め）
@@ -1033,7 +1046,7 @@
             TADPOLE: 18,
             DRAGON: 25,
             HUNTER: 20,    // ★追加：星型なので少し大きめに設定
-            BULLET: 8      // 敵が撃ってくる赤い弾の判定サイズ
+            BULLET: 8,      // 敵が撃ってくる赤い弾の判定サイズ
         };
 
         // --- エフェクト演出設定 ---
@@ -1525,7 +1538,7 @@
                     hp: 1,
                     speed: ENEMY_SPEEDS.TADPOLE * spd * stageMag,
                     color: '#fff', type: 'tadpole', angle: 0,
-                    drop: 'none', // 雑魚は出さない
+                    drop: 'none',
                     scale: 0.6, history: []
                 });
                 spawnedCount++;
@@ -1681,7 +1694,8 @@
                     burstCount: 0      // ★追加：連射数カウント用
                 });
                 spawnedCount++;
-            }
+            } 
+
         }
 
         function launchSatellites() {
@@ -1889,14 +1903,24 @@
             const fireInterval = player.laserTimer > 0 ? 4 : 6;
             if ((input.aim.active || input.keys['Space'] || input.keys['KeyZ']) && frame % fireInterval === 0) fire();
 
-            // --- ★修正：ワームホール生成ロジックの強化 ---
+
+
+            // --- ★修正：ワームホール生成ロジックの強化と制限 ---
             const maxWormholes = SPAWN_SETTINGS.MAX_WORMHOLES_BASE + stage * 1.5;
             const activeWormholes = wormholes.filter(w => w.active).length;
 
+            // 現在のステージの最大同時出現数を取得（設定がない場合はデフォルト40）
+            const currentMaxOnScreen = STAGE_MAX_ON_SCREEN[stage - 1] || 40;
+
             // 基本の生成条件
-            let shouldSpawnWormhole = spawnedCount < enemiesToSpawn && activeWormholes < maxWormholes && Math.random() < SPAWN_SETTINGS.WORMHOLE_CHANCE;
+            let shouldSpawnWormhole =
+                spawnedCount < enemiesToSpawn &&
+                activeWormholes < maxWormholes &&
+                enemies.length < currentMaxOnScreen && // ★ここを追加：画面内の敵が規定数より少ない時だけ出す
+                Math.random() < SPAWN_SETTINGS.WORMHOLE_CHANCE;
 
             // ★救済措置：敵もワームホールもいないのに、まだ出すべき敵が残っている場合は強制生成
+            // (制限にかかっていても、敵がゼロなら出す必要がある)
             if (enemies.length === 0 && activeWormholes === 0 && spawnedCount < enemiesToSpawn) {
                 shouldSpawnWormhole = true;
             }
@@ -1904,6 +1928,8 @@
             if (shouldSpawnWormhole) {
                 spawnWormhole();
             }
+
+
 
             wormholes.forEach((w) => {
                 w.life--;
@@ -2180,22 +2206,41 @@
                 b.y += b.vy;
                 b.life--;
 
-                // --- ★追加：ワールド境界との衝突判定 ---
+                // --- ワールド境界との衝突判定 ---
                 if (b.x < WALL_MARGIN || b.x > worldSize - WALL_MARGIN ||
                     b.y < WALL_MARGIN || b.y > worldSize - WALL_MARGIN) {
 
                     const impactX = Math.max(WALL_MARGIN, Math.min(worldSize - WALL_MARGIN, b.x));
                     const impactY = Math.max(WALL_MARGIN, Math.min(worldSize - WALL_MARGIN, b.y));
 
-                    createWallImpact(impactX, impactY, '#0f8'); // 自機弾の色
-                    b.life = 0; // 消滅させる
+                    createWallImpact(impactX, impactY, '#0f8');
+                    b.life = 0;
                 }
 
-                // 敵との当たり判定（既存通り）
+                // --- 敵との当たり判定 ---
                 enemies.forEach(e => {
-                    if (Math.hypot(b.x - e.x, b.y - e.y) < 30 * e.scale) {
-                        b.life = 0;
-                        e.hp--;
+                    // 弾が既に消えている、または敵が死んでいる場合はスキップ
+                    if (b.life <= 0 || e.hp <= 0) return;
+
+                    // 敵の種類ごとの判定半径
+                    let hitRadius = 30 * e.scale;
+                    if (e.type === 'asteroid') hitRadius = 25 * e.scale;
+                    else if (e.type === 'dragon') hitRadius = ENEMY_HITBOX.DRAGON;
+                    else if (e.type === 'triangle') hitRadius = ENEMY_HITBOX.TRIANGLE;
+                    else if (e.type === 'cube') hitRadius = ENEMY_HITBOX.CUBE;
+                    else if (e.type === 'tadpole') hitRadius = ENEMY_HITBOX.TADPOLE;
+                    else if (e.type === 'hunter') hitRadius = ENEMY_HITBOX.HUNTER;
+                    else if (e.type === 'boss') hitRadius = 45;
+
+                    // 距離チェック
+                    if (Math.hypot(b.x - e.x, b.y - e.y) < hitRadius) {
+
+                        b.life = 0; // 弾を消す
+                        e.hp--;     // ダメージを与える
+
+                        // --- ★修正ポイント：ヒット演出 ---
+
+                        // 1. ボスの場合（既存）
                         if (e.type === 'boss') {
                             e.flashTimer = 5;
                             AudioSys.playSE('boss_hit');
@@ -2206,6 +2251,28 @@
                                     vy: (Math.random() - 0.5) * 10,
                                     color: '#fff', life: 0.2, size: 2
                                 });
+                            }
+                        }
+                        // 2. ボス以外の敵（ここが重要）
+                        else {
+                            // HPがまだ残っているなら火花を出す
+                            if (e.hp > 0) {
+                                const sparkColor = e.color || '#fff';
+                                for (let i = 0; i < 4; i++) {
+                                    particles.push({
+                                        x: b.x,
+                                        y: b.y,
+                                        // 弾が当たって砕けるイメージで拡散
+                                        vx: (Math.random() - 0.5) * 8, // ★速度を少し上げて散らばりやすく
+                                        vy: (Math.random() - 0.5) * 8,
+                                        color: sparkColor,
+
+                                        // ★ここを修正：0.2だと薄すぎるので、0.8～1.2程度にする
+                                        life: 0.8 + Math.random() * 0.4,
+
+                                        size: 2.0 // ★少し大きくして視認性アップ
+                                    });
+                                }
                             }
                         }
                     }
@@ -2238,7 +2305,7 @@
                     }
                 }
 
-    
+
                 // --- 共通処理 ---
                 applySeparation(e);
                 applyAsteroidCollisions(e);
@@ -2410,8 +2477,139 @@
             e.x += e.vx; e.y += e.vy; e.rotX += 0.03; e.rotY += 0.04;
         }
 
-        // ★新設：ハンターのAI関数
-        // ★定数対応版：HunterのAI関数
+        function updateAsteroidAI(e) {
+            // 時間経過のカウント
+            e.spawnTimer = (e.spawnTimer || 0) + 1;
+
+            // --- 覚醒判定（白 → 赤） ---
+            if (!e.isTracking && e.spawnTimer > e.trackingStart) {
+                e.isTracking = true;
+                e.color = '#ff4444'; // より鮮やかな赤に
+
+                // ★修正ポイント1：モード切替時の速度変換と減速
+                // 今までの移動速度(vx * speed)を計算し、実速度としてvx, vyに適用します。
+                // さらに * 0.2 を掛けることで、一度急ブレーキをかけます。
+                // これにより「ギョロっとこっちを見て動き出す」ような挙動になります。
+                e.vx = (e.vx * e.speed) * 0.2;
+                e.vy = (e.vy * e.speed) * 0.2;
+
+                // 以降は speed 変数は使わず、vx, vy を直接操作するため 1 にリセット
+                e.speed = 1;
+
+                // 回転を速くする（荒ぶる演出）
+                e.rotSpd *= 5;
+            }
+
+            if (e.isTracking) {
+                // --- 追跡モード（自機へ加速） ---
+                const dx = player.x - e.x;
+                const dy = player.y - e.y;
+                const dist = Math.hypot(dx, dy) || 0.001;
+
+                // ★修正ポイント2：誘導性能（加速度）を強化
+                // 以前の値(0.15)だと弱すぎたため、0.6程度まで上げます
+                const accel = (0.6 / e.size) * SPEED_SCALE;
+
+                e.vx += (dx / dist) * accel;
+                e.vy += (dy / dist) * accel;
+
+                // ★修正ポイント3：最高速度制限と摩擦
+                // ずっと加速し続けると制御不能になるため、適度な摩擦(0.98)と上限を設けます
+                const maxSpeed = 7.0 * SPEED_SCALE;
+                e.vx *= 0.99; // 空気抵抗（宇宙だけど制御しやすくするため）
+                e.vy *= 0.99;
+
+                const currentSpeed = Math.hypot(e.vx, e.vy);
+                if (currentSpeed > maxSpeed) {
+                    e.vx = (e.vx / currentSpeed) * maxSpeed;
+                    e.vy = (e.vy / currentSpeed) * maxSpeed;
+                }
+
+                // 移動
+                e.x += e.vx;
+                e.y += e.vy;
+
+            } else {
+                // --- 通常モード（漂流） ---
+                // 以前のロジック：e.vx * e.speed で移動
+                e.x += e.vx * e.speed;
+                e.y += e.vy * e.speed;
+
+                // 画面端の処理（漂流中のみループor反射）
+                if (e.x < 0 || e.x > worldSize) e.vx *= -1;
+                if (e.y < 0 || e.y > worldSize) e.vy *= -1;
+            }
+
+            // 自転
+            e.angle += e.rotSpd;
+        }
+
+        function applyAsteroidCollisions(e) {
+            if (e.type !== 'asteroid') return;
+
+            enemies.forEach(other => {
+                // 自分自身、または死んでいる敵、アステロイド以外の敵は無視
+                if (e === other || other.hp <= 0 || other.type !== 'asteroid') return;
+
+                const dx = other.x - e.x;
+                const dy = other.y - e.y;
+                const dist = Math.hypot(dx, dy) || 0.001;
+
+                // --- 判定半径の動的な計算 ---
+                // 基本半径20pxにそれぞれのscaleを掛け、さらに描画倍率G_SCALEを考慮
+                const r1 = 20 * e.scale * G_SCALE;
+                const r2 = 20 * other.scale * G_SCALE;
+                const minDist = r1 + r2;
+
+                if (dist < minDist) {
+                    // --- 1. 重なり（めり込み）の解消 ---
+                    const overlap = minDist - dist;
+                    const nx = dx / dist; // 法線ベクトルx
+                    const ny = dy / dist; // 法線ベクトルy
+
+                    // サイズ（scale）を重みとして、小さい方がより大きく弾かれるように調整
+                    // (質量 = scaleの2乗に比例すると仮定するとよりリアルですが、シンプルにscale比で計算)
+                    const totalScale = e.scale + other.scale;
+                    const ratioE = other.scale / totalScale;
+                    const ratioOther = e.scale / totalScale;
+
+                    e.x -= nx * overlap * ratioE;
+                    e.y -= ny * overlap * ratioE;
+                    other.x += nx * overlap * ratioOther;
+                    other.y += ny * overlap * ratioOther;
+
+                    // --- 2. 速度ベクトルの反射（弾性衝突） ---
+                    // 相対速度
+                    const rvx = other.vx - e.vx;
+                    const rvy = other.vy - e.vy;
+
+                    // 法線方向の速度成分（内積）
+                    const velAlongNormal = rvx * nx + rvy * ny;
+
+                    // 既に離れようとしている（ベクトルが外向き）場合は処理しない
+                    if (velAlongNormal > 0) return;
+
+                    // 反発係数 (0.6〜0.8くらいが岩らしくて自然です)
+                    const restitution = 0.7;
+                    const j = -(1 + restitution) * velAlongNormal;
+
+                    // 質量比に基づいた速度変化（大きい岩ほど動きにくい）
+                    e.vx -= j * nx * ratioE;
+                    e.vy -= j * ny * ratioE;
+                    other.vx += j * nx * ratioOther;
+                    other.vy += j * ny * ratioOther;
+
+                    // --- 3. 衝突時の火花演出 ---
+                    // 激しくぶつかった時だけ火花を出す
+                    if (Math.abs(velAlongNormal) > 1 && frame % 2 === 0) {
+                        const midX = (e.x + other.x) / 2;
+                        const midY = (e.y + other.y) / 2;
+                        createExplosion(midX, midY, '#fff', 2);
+                    }
+                }
+            });
+        }
+
         function updateHunterAI(e) {
             const dx = player.x - e.x;
             const dy = player.y - e.y;
@@ -2589,132 +2787,8 @@
             if (e.fireTimer >= maxCycle) e.fireTimer = 0;
         }
 
-        function updateAsteroidAI(e) {
-            // 時間経過のカウント
-            e.spawnTimer = (e.spawnTimer || 0) + 1;
 
-            // --- 覚醒判定 ---
-            if (!e.isTracking && e.spawnTimer > e.trackingStart) {
-                e.isTracking = true;
-                e.color = '#ff8888'; // 赤く変色して危険を知らせる
 
-                // ★重要：物理計算の統合
-                // これまでは update で「vx * speed」と計算していましたが、
-                // 追跡モードでは「vx」自体を実際の速度として扱いたいため、
-                // ここで speed を vx, vy に焼き付けて speed を 1 にリセットします。
-                e.vx *= e.speed;
-                e.vy *= e.speed;
-                e.speed = 1;
-
-                // 回転を速くする（荒ぶる演出）
-                e.rotSpd *= 3;
-            }
-
-            if (e.isTracking) {
-                // --- 追跡モード（自機へ加速） ---
-                const dx = player.x - e.x;
-                const dy = player.y - e.y;
-                const dist = Math.hypot(dx, dy) || 0.001;
-
-                // 誘導性能（サイズが大きいほど鈍重に）
-                const accel = (0.15 / e.size) * SPEED_SCALE;
-
-                e.vx += (dx / dist) * accel;
-                e.vy += (dy / dist) * accel;
-
-                // 最高速度制限（漂流時の1.5倍まで加速可能）
-                // 元の moveSpeed は spawnEnemy で計算されているので、ここでは推定値でキャップをかけます
-                const maxSpeed = 8.0 * SPEED_SCALE;
-                const currentSpeed = Math.hypot(e.vx, e.vy);
-                if (currentSpeed > maxSpeed) {
-                    e.vx = (e.vx / currentSpeed) * maxSpeed;
-                    e.vy = (e.vy / currentSpeed) * maxSpeed;
-                }
-
-                // 移動
-                e.x += e.vx;
-                e.y += e.vy;
-
-            } else {
-                // --- 通常モード（漂流） ---
-                // 以前のロジック：e.vx * e.speed で移動
-                e.x += e.vx * e.speed;
-                e.y += e.vy * e.speed;
-
-                // 画面端の処理（漂流中のみループor反射）
-                if (e.x < 0 || e.x > worldSize) e.vx *= -1;
-                if (e.y < 0 || e.y > worldSize) e.vy *= -1;
-            }
-
-            // 自転
-            e.angle += e.rotSpd;
-        }
-
-        function applyAsteroidCollisions(e) {
-            if (e.type !== 'asteroid') return;
-
-            enemies.forEach(other => {
-                // 自分自身、または死んでいる敵、アステロイド以外の敵は無視
-                if (e === other || other.hp <= 0 || other.type !== 'asteroid') return;
-
-                const dx = other.x - e.x;
-                const dy = other.y - e.y;
-                const dist = Math.hypot(dx, dy) || 0.001;
-
-                // --- 判定半径の動的な計算 ---
-                // 基本半径20pxにそれぞれのscaleを掛け、さらに描画倍率G_SCALEを考慮
-                const r1 = 20 * e.scale * G_SCALE;
-                const r2 = 20 * other.scale * G_SCALE;
-                const minDist = r1 + r2;
-
-                if (dist < minDist) {
-                    // --- 1. 重なり（めり込み）の解消 ---
-                    const overlap = minDist - dist;
-                    const nx = dx / dist; // 法線ベクトルx
-                    const ny = dy / dist; // 法線ベクトルy
-
-                    // サイズ（scale）を重みとして、小さい方がより大きく弾かれるように調整
-                    // (質量 = scaleの2乗に比例すると仮定するとよりリアルですが、シンプルにscale比で計算)
-                    const totalScale = e.scale + other.scale;
-                    const ratioE = other.scale / totalScale;
-                    const ratioOther = e.scale / totalScale;
-
-                    e.x -= nx * overlap * ratioE;
-                    e.y -= ny * overlap * ratioE;
-                    other.x += nx * overlap * ratioOther;
-                    other.y += ny * overlap * ratioOther;
-
-                    // --- 2. 速度ベクトルの反射（弾性衝突） ---
-                    // 相対速度
-                    const rvx = other.vx - e.vx;
-                    const rvy = other.vy - e.vy;
-
-                    // 法線方向の速度成分（内積）
-                    const velAlongNormal = rvx * nx + rvy * ny;
-
-                    // 既に離れようとしている（ベクトルが外向き）場合は処理しない
-                    if (velAlongNormal > 0) return;
-
-                    // 反発係数 (0.6〜0.8くらいが岩らしくて自然です)
-                    const restitution = 0.7;
-                    const j = -(1 + restitution) * velAlongNormal;
-
-                    // 質量比に基づいた速度変化（大きい岩ほど動きにくい）
-                    e.vx -= j * nx * ratioE;
-                    e.vy -= j * ny * ratioE;
-                    other.vx += j * nx * ratioOther;
-                    other.vy += j * ny * ratioOther;
-
-                    // --- 3. 衝突時の火花演出 ---
-                    // 激しくぶつかった時だけ火花を出す
-                    if (Math.abs(velAlongNormal) > 1 && frame % 2 === 0) {
-                        const midX = (e.x + other.x) / 2;
-                        const midY = (e.y + other.y) / 2;
-                        createExplosion(midX, midY, '#fff', 2);
-                    }
-                }
-            });
-        }
 
         // --- ボス描画 ---
         function drawBossEnemy(ctx, e) {
@@ -3709,6 +3783,9 @@
             ctx.globalCompositeOperation = 'source-over';
         }
 
+
+
+
         function drawTriangleEnemy(ctx, e) {
             // セーフガード: 万が一数値が異常な場合は描画をスキップ
             if (!e || typeof e.x !== 'number' || isNaN(e.x)) return;
@@ -3865,7 +3942,6 @@
             ctx.shadowBlur = 0;
         }
 
-        
         function drawHunterEnemy(ctx, e) {
             ctx.save();
             ctx.translate(e.x, e.y);
@@ -3970,6 +4046,270 @@
                 ctx.lineTo(250, 0); // 視線を少し長く
                 ctx.stroke();
             }
+
+            ctx.restore();
+        }
+
+        // 補助関数：色から色相(Hue)を取り出す（コードの最後の方に追加してください）
+        function getHue(color) {
+            if (color.startsWith('#')) {
+                // 簡易的な16進数→Hue変換（ボスの主要色に対応）
+                if (color === '#f0f') return 300; // マゼンタ
+                if (color === '#ffff00') return 60; // 黄
+                if (color === '#0f8') return 150; // エメラルド
+                if (color === '#0cc') return 180; // シアン
+                if (color === '#44f') return 240; // 青
+                if (color === '#f40') return 20;  // オレンジ赤
+                if (color === '#f08') return 330; // ローズ
+                if (color === '#fff') return 0;   // 白
+            }
+            return 0;
+        }
+
+        function drawTadpoleEnemy(ctx, e) {
+            ctx.save();
+
+            // --- カラー設定：明るい水色（シアンネオン） ---
+            const neonCyan = "#0ff";      // 鮮やかなシアン
+            const lightCyan = "#ccffff";  // ハイライト用の白に近い青
+
+            // --- 1. テイル（高速流動フラグメント）の描画 ---
+            if (e.history.length > 1) {
+                ctx.setLineDash([12, 18]);
+                for (let i = 0; i < e.history.length - 1; i += 3) {
+                    const p1 = e.history[i];
+                    const p2 = e.history[i + 1];
+                    if (!p2) break;
+
+                    const ratio = i / e.history.length;
+                    const alpha = (1 - ratio) * 0.6;
+
+                    // 尾も水色のグラデーションに
+                    ctx.strokeStyle = `rgba(0, 255, 255, ${alpha})`;
+                    ctx.lineWidth = (14 - ratio * 14) * G_SCALE;
+
+                    ctx.beginPath();
+                    ctx.moveTo(p1.x, p1.y);
+                    ctx.lineTo(p2.x, p2.y);
+                    ctx.stroke();
+                }
+                ctx.setLineDash([]);
+            }
+
+            // --- 2. 幾何学メカニカル・ヘッド（頭部）の描画 ---
+            ctx.translate(e.x, e.y);
+            ctx.rotate(e.angle);
+            ctx.scale(e.scale * G_SCALE, e.scale * G_SCALE);
+
+            // 背景の遮蔽（より深い紺色で水色を引き立てる）
+            ctx.fillStyle = 'rgba(0, 10, 20, 0.9)';
+            ctx.beginPath();
+            ctx.rect(-10, -15, 45, 30);
+            ctx.fill();
+
+            // ワイヤーフレームの設定
+            ctx.strokeStyle = neonCyan;
+            ctx.lineWidth = 2;
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = neonCyan;
+
+            // --- メインボディ「＝＝＝」部分 ---
+            for (let j = 0; j < 3; j++) {
+                const xPos = j * 12;
+                // シリンダーリング
+                ctx.beginPath();
+                ctx.ellipse(xPos, 0, 8, 15, 0, 0, Math.PI * 2);
+                ctx.stroke();
+
+                // 水平支柱（ハイライト色を混ぜる）
+                ctx.save();
+                ctx.strokeStyle = lightCyan;
+                ctx.lineWidth = 0.8;
+                ctx.beginPath();
+                ctx.moveTo(xPos, -15); ctx.lineTo(xPos + 12, -15);
+                ctx.moveTo(xPos, 15); ctx.lineTo(xPos + 12, 15);
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            // --- 先端ユニット「＜＜」部分 ---
+            ctx.beginPath();
+            ctx.lineWidth = 2.5;
+            ctx.moveTo(35, -14); ctx.lineTo(52, 0); ctx.lineTo(35, 14); // 外側の ＜
+            ctx.stroke();
+
+            ctx.save();
+            ctx.strokeStyle = lightCyan;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(25, -9); ctx.lineTo(42, 0); ctx.lineTo(25, 9);   // 内側の ＜
+            ctx.stroke();
+            ctx.restore();
+
+            // --- コア・ユニット ---
+            // 中心部で強く輝く水色のエネルギー体
+            ctx.fillStyle = lightCyan;
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = neonCyan;
+            ctx.beginPath();
+            ctx.rect(5, -4, 8, 8);
+            ctx.fill();
+
+            ctx.restore();
+            ctx.shadowBlur = 0;
+        }
+
+        function drawDragonEnemy(ctx, e) {
+            const finalScale = e.scale * G_SCALE;
+            ctx.save();
+            ctx.scale(finalScale, finalScale);
+
+            // --- 共通設定：メカニカルな直線美 ---
+            ctx.strokeStyle = e.color;
+            ctx.lineWidth = 3.5;
+            ctx.lineCap = 'butt'; // 角を四角く
+            ctx.lineJoin = 'miter'; // 接合部を鋭角に
+
+            // 節の間隔調整（少し詰めてキャタピラ感を出す）
+            const gapFactor = 1.7;
+
+            // --- 1. 胴体セグメント（コンテナブロック）の描画 ---
+            // 後ろの節から描画して、頭が一番上に来るようにする（順序逆転はしていないが、重なりは考慮）
+            for (let i = e.segments.length - 1; i >= 0; i--) {
+                const s = e.segments[i];
+
+                // ターゲット計算と角度補間（既存ロジック維持）
+                const target = (i === 0) ? e : e.segments[i - 1];
+                const targetAngle = Math.atan2(target.y - s.y, target.x - s.x);
+
+                if (s.angle === undefined) s.angle = targetAngle;
+                let diff = targetAngle - s.angle;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                s.angle += diff * 0.15;
+
+                // 座標変換
+                const dx = (s.x - e.x) * gapFactor;
+                const dy = (s.y - e.y) * gapFactor;
+
+                ctx.save();
+                ctx.translate((e.x + dx) / finalScale, (e.y + dy) / finalScale);
+                ctx.rotate(s.angle);
+
+                // --- 描画：六角形コンテナ装甲 ---
+                const sizeMod = Math.max(0.6, 1 - (i * 0.04)); // 後ろほど小さく
+                const w = 12 * sizeMod; // 幅
+                const h = 18 * sizeMod; // 高さ
+
+                // 本体フレーム
+                ctx.beginPath();
+                ctx.moveTo(w, -h / 2);
+                ctx.lineTo(w, h / 2);
+                ctx.lineTo(-w * 0.9, h); // 後部を少し絞る
+                ctx.lineTo(-w * 0.9, -h);
+                ctx.closePath();
+
+                // 内部の暗部（密度感を出す）
+                ctx.fillStyle = 'rgba(100, 0, 0, 0.8)';
+                ctx.fill();
+                ctx.stroke();
+
+                // ディテール：放熱フィン（横縞）
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(-w * 0.5, -h / 3); ctx.lineTo(w, -h / 3);
+                ctx.moveTo(-w * 0.5, h / 3); ctx.lineTo(w, h / 3);
+                ctx.stroke();
+
+                // 接続アーム（前の節へ伸びるパーツ）
+                if (i > 0) {
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+                    ctx.beginPath();
+                    ctx.moveTo(w, 0);
+                    ctx.lineTo(w + 10, 0); // 前へ線を伸ばす
+                    ctx.stroke();
+                }
+
+                ctx.restore();
+            }
+
+            // --- 2. 頭部ユニット（センサー＆ドリル） ---
+            ctx.save();
+            ctx.translate(e.x / finalScale, e.y / finalScale);
+            ctx.rotate(e.angle);
+
+            // 頭部の発光強化
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = e.color;
+
+            // メインヘッド：鋭角なくさび形
+            ctx.fillStyle = '#500';
+            ctx.beginPath();
+            ctx.moveTo(25, 0);   // 先端
+            ctx.lineTo(-10, -12);
+            ctx.lineTo(-5, 0);   // くびれ
+            ctx.lineTo(-10, 12);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = e.color;
+            ctx.stroke();
+
+            // センサーアイ（単眼）
+            ctx.fillStyle = '#f99';
+            ctx.shadowColor = '#f99';
+            ctx.beginPath();
+            ctx.rect(5, -3, 8, 6); // 長方形の目
+            ctx.fill();
+
+            // サイドアンテナ
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(-5, -10); ctx.lineTo(-15, -20);
+            ctx.moveTo(-5, 10); ctx.lineTo(-15, 20);
+            ctx.stroke();
+
+            ctx.restore();
+            ctx.restore();
+        }
+
+        function drawAsteroidEnemy(ctx, e) {
+            ctx.save();
+            ctx.translate(e.x, e.y);
+            ctx.rotate(e.angle);
+
+            // スケールを適用
+            const s = e.scale * G_SCALE;
+            ctx.scale(s, s);
+
+            // ネオンホワイトのワイヤーフレーム設定
+            ctx.strokeStyle = '#fff';
+
+            // ★ポイント: 小さくなっても線の太さを維持する計算
+            // スケール s で割ることで、画面上の見た目の太さを常に一定（約1.5px）に保ちます
+            ctx.lineWidth = 1.5 / s;
+
+            ctx.shadowBlur = 12 / s; // 発光もスケールに合わせて調整
+            ctx.shadowColor = '#fff';
+
+            ctx.beginPath();
+            // 岩の形状（e.sizeをシードにして形状を固定）
+            for (let i = 0; i < 8; i++) {
+                const r = 22 * (0.8 + Math.sin(i * 2.1 + e.size * 5) * 0.25);
+                const ang = (Math.PI * 2 / 8) * i;
+                const tx = Math.cos(ang) * r;
+                const ty = Math.sin(ang) * r;
+                if (i === 0) ctx.moveTo(tx, ty); else ctx.lineTo(tx, ty);
+            }
+            ctx.closePath();
+            ctx.stroke();
+
+            // 内部の亀裂（これも線の太さを維持）
+            ctx.globalAlpha = 0.2;
+            ctx.beginPath();
+            ctx.moveTo(-10, -5); ctx.lineTo(5, 8);
+            ctx.stroke();
 
             ctx.restore();
         }
@@ -4109,255 +4449,9 @@
             ctx.restore();
         }
 
-        // 補助関数：色から色相(Hue)を取り出す（コードの最後の方に追加してください）
-        function getHue(color) {
-            if (color.startsWith('#')) {
-                // 簡易的な16進数→Hue変換（ボスの主要色に対応）
-                if (color === '#f0f') return 300; // マゼンタ
-                if (color === '#ffff00') return 60; // 黄
-                if (color === '#0f8') return 150; // エメラルド
-                if (color === '#0cc') return 180; // シアン
-                if (color === '#44f') return 240; // 青
-                if (color === '#f40') return 20;  // オレンジ赤
-                if (color === '#f08') return 330; // ローズ
-                if (color === '#fff') return 0;   // 白
-            }
-            return 0;
-        }
 
-        function drawTadpoleEnemy(ctx, e) {
-            ctx.save();
 
-            // --- カラー設定：明るい水色（シアンネオン） ---
-            const neonCyan = "#0ff";      // 鮮やかなシアン
-            const lightCyan = "#ccffff";  // ハイライト用の白に近い青
 
-            // --- 1. テイル（高速流動フラグメント）の描画 ---
-            if (e.history.length > 1) {
-                ctx.setLineDash([12, 18]);
-                for (let i = 0; i < e.history.length - 1; i += 3) {
-                    const p1 = e.history[i];
-                    const p2 = e.history[i + 1];
-                    if (!p2) break;
-
-                    const ratio = i / e.history.length;
-                    const alpha = (1 - ratio) * 0.6;
-
-                    // 尾も水色のグラデーションに
-                    ctx.strokeStyle = `rgba(0, 255, 255, ${alpha})`;
-                    ctx.lineWidth = (14 - ratio * 14) * G_SCALE;
-
-                    ctx.beginPath();
-                    ctx.moveTo(p1.x, p1.y);
-                    ctx.lineTo(p2.x, p2.y);
-                    ctx.stroke();
-                }
-                ctx.setLineDash([]);
-            }
-
-            // --- 2. 幾何学メカニカル・ヘッド（頭部）の描画 ---
-            ctx.translate(e.x, e.y);
-            ctx.rotate(e.angle);
-            ctx.scale(e.scale * G_SCALE, e.scale * G_SCALE);
-
-            // 背景の遮蔽（より深い紺色で水色を引き立てる）
-            ctx.fillStyle = 'rgba(0, 10, 20, 0.9)';
-            ctx.beginPath();
-            ctx.rect(-10, -15, 45, 30);
-            ctx.fill();
-
-            // ワイヤーフレームの設定
-            ctx.strokeStyle = neonCyan;
-            ctx.lineWidth = 2;
-            ctx.shadowBlur = 15;
-            ctx.shadowColor = neonCyan;
-
-            // --- メインボディ「＝＝＝」部分 ---
-            for (let j = 0; j < 3; j++) {
-                const xPos = j * 12;
-                // シリンダーリング
-                ctx.beginPath();
-                ctx.ellipse(xPos, 0, 8, 15, 0, 0, Math.PI * 2);
-                ctx.stroke();
-
-                // 水平支柱（ハイライト色を混ぜる）
-                ctx.save();
-                ctx.strokeStyle = lightCyan;
-                ctx.lineWidth = 0.8;
-                ctx.beginPath();
-                ctx.moveTo(xPos, -15); ctx.lineTo(xPos + 12, -15);
-                ctx.moveTo(xPos, 15); ctx.lineTo(xPos + 12, 15);
-                ctx.stroke();
-                ctx.restore();
-            }
-
-            // --- 先端ユニット「＜＜」部分 ---
-            ctx.beginPath();
-            ctx.lineWidth = 2.5;
-            ctx.moveTo(35, -14); ctx.lineTo(52, 0); ctx.lineTo(35, 14); // 外側の ＜
-            ctx.stroke();
-
-            ctx.save();
-            ctx.strokeStyle = lightCyan;
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.moveTo(25, -9); ctx.lineTo(42, 0); ctx.lineTo(25, 9);   // 内側の ＜
-            ctx.stroke();
-            ctx.restore();
-
-            // --- コア・ユニット ---
-            // 中心部で強く輝く水色のエネルギー体
-            ctx.fillStyle = lightCyan;
-            ctx.shadowBlur = 20;
-            ctx.shadowColor = neonCyan;
-            ctx.beginPath();
-            ctx.rect(5, -4, 8, 8);
-            ctx.fill();
-
-            ctx.restore();
-            ctx.shadowBlur = 0;
-        }
-
-        function drawDragonEnemy(ctx, e) {
-            ctx.save();
-
-            const finalScale = e.scale * G_SCALE;
-            ctx.scale(finalScale, finalScale);
-
-            ctx.strokeStyle = e.color;
-            ctx.lineWidth = 3.5;
-            ctx.shadowBlur = 1;
-            ctx.shadowColor = e.color;
-
-            // --- 1. 胴体セグメントの描画 ---
-            const gapFactor = 2;
-
-            e.segments.forEach((s, i) => {
-                ctx.save();
-                const dx = (s.x - e.x) * gapFactor;
-                const dy = (s.y - e.y) * gapFactor;
-
-                ctx.translate((e.x + dx) / finalScale, (e.y + dy) / finalScale);
-
-                // ★修正：回転させない（常に画面に対して上向きなら rotate(0) 相当）
-                // もし「頭と同じ向き」にしたいなら ctx.rotate(e.angle); にしますが、
-                // 「曲がるときに横向きになるのを防ぐ＝上向き固定」と解釈して回転を削除します。
-                // ctx.rotate(s.angle); // ← この行を削除またはコメントアウト
-
-                const sizeMod = Math.max(0.4, 1 - (i * 0.04));
-                const cylinderRadius = 20 * sizeMod;
-
-                ctx.beginPath();
-                ctx.ellipse(0, 0, 10 * sizeMod, cylinderRadius, 0, 0, Math.PI * 2);
-                ctx.stroke();
-
-                ctx.beginPath();
-                ctx.moveTo(0, -cylinderRadius);
-                ctx.lineTo(-15 * sizeMod, -cylinderRadius - (12 * sizeMod));
-                ctx.moveTo(0, cylinderRadius);
-                ctx.lineTo(-15 * sizeMod, cylinderRadius + (12 * sizeMod));
-                ctx.stroke();
-
-                ctx.save();
-                ctx.lineWidth = 2.5;
-                ctx.beginPath();
-                [0.8, 0.4, -0.4, -0.8].forEach(off => {
-                    ctx.moveTo(-6 * sizeMod, cylinderRadius * off);
-                    ctx.lineTo(6 * sizeMod, cylinderRadius * off);
-                });
-                ctx.stroke();
-                ctx.restore();
-
-                ctx.restore();
-            });
-
-            // --- 2. 頭部ユニット ---
-            ctx.save();
-            ctx.translate(e.x / finalScale, e.y / finalScale);
-            // 頭部は進行方向を向く必要があるならそのまま。
-            // もし頭部も上向き固定ならここも削除しますが、通常は頭は向くはずです。
-            ctx.rotate(e.angle);
-
-            // リングの描画
-            for (let k = 0; k < 3; k++) {
-                const rPos = k * 8;
-                const rSize = 20 - k * 2;
-                ctx.beginPath();
-                ctx.ellipse(rPos, 0, 6, rSize, 0, 0, Math.PI * 2);
-                ctx.stroke();
-
-                ctx.save();
-                ctx.lineWidth = 3;
-                ctx.beginPath();
-                ctx.moveTo(rPos, -rSize); ctx.lineTo(rPos + 8, -rSize + 2);
-                ctx.moveTo(rPos, rSize); ctx.lineTo(rPos + 8, rSize - 2);
-                ctx.stroke();
-                ctx.restore();
-            }
-
-            // --- ★ 追加：中心の白いコア ---
-            ctx.save();
-            // コア自体の強い発光（白）
-            ctx.shadowBlur = 15;
-            ctx.shadowColor = "#f88";
-            ctx.fillStyle = "#f88";
-            ctx.beginPath();
-            // 少し奥（リングの間）にあるように配置
-            ctx.arc(8, 0, 6, 0, Math.PI * 2);
-            ctx.fill();
-
-            // 外側に漏れるメインカラーの光
-            ctx.shadowBlur = 25;
-            ctx.shadowColor = e.color;
-            ctx.globalAlpha = 0.5;
-            ctx.beginPath();
-            ctx.arc(8, 0, 9, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.restore();
-
-            ctx.restore();
-            ctx.restore();
-        }
-
-        function drawAsteroidEnemy(ctx, e) {
-            ctx.save();
-            ctx.translate(e.x, e.y);
-            ctx.rotate(e.angle);
-
-            // スケールを適用
-            const s = e.scale * G_SCALE;
-            ctx.scale(s, s);
-
-            // ネオンホワイトのワイヤーフレーム設定
-            ctx.strokeStyle = '#fff';
-
-            // ★ポイント: 小さくなっても線の太さを維持する計算
-            // スケール s で割ることで、画面上の見た目の太さを常に一定（約1.5px）に保ちます
-            ctx.lineWidth = 1.5 / s;
-
-            ctx.shadowBlur = 12 / s; // 発光もスケールに合わせて調整
-            ctx.shadowColor = '#fff';
-
-            ctx.beginPath();
-            // 岩の形状（e.sizeをシードにして形状を固定）
-            for (let i = 0; i < 8; i++) {
-                const r = 22 * (0.8 + Math.sin(i * 2.1 + e.size * 5) * 0.25);
-                const ang = (Math.PI * 2 / 8) * i;
-                const tx = Math.cos(ang) * r;
-                const ty = Math.sin(ang) * r;
-                if (i === 0) ctx.moveTo(tx, ty); else ctx.lineTo(tx, ty);
-            }
-            ctx.closePath();
-            ctx.stroke();
-
-            // 内部の亀裂（これも線の太さを維持）
-            ctx.globalAlpha = 0.2;
-            ctx.beginPath();
-            ctx.moveTo(-10, -5); ctx.lineTo(5, 8);
-            ctx.stroke();
-
-            ctx.restore();
-        }
 
         // 通常の敵弾を描画する関数
         function drawNormalBullet(ctx, eb) {
@@ -4603,7 +4697,7 @@
             ctx.globalAlpha = 1.0;
         }
 
-        //画面左上にミニマップを表示する
+ 
         function drawMiniMap() {
             // プレイ中または死亡演出中以外は非表示
             const container = document.getElementById('minimap-container');
