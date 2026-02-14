@@ -429,8 +429,8 @@
         /* --- 特殊攻撃（BOMB/LAUNCH）ボタン --- */
         #launch-btn {
             position: absolute;
-            width: 80px;
-            height: 80px;
+            width: 60px;
+            height: 60px;
             border-radius: 50%;
             background: rgba(255, 255, 0, 0.1);
             border: 2px solid #ff0;
@@ -485,7 +485,7 @@
 
         #launch-btn {
             right: 20px;
-            bottom: 100px;
+            bottom: 200px;
         }
 
         /* --- 縦向き設定（Portrait） --- */
@@ -686,6 +686,7 @@
         <div id="minimap-container">
             <canvas id="minimap-canvas" width="100" height="100"></canvas>
         </div>
+
         <div class="hud-row">
             <div id="info-box" style="display:flex; flex-direction:column; gap:8px;">
                 <div id="score-display">000000</div>
@@ -953,6 +954,18 @@
         // 通常ショットの最大強化レベル（1〜7）
         const MAX_WEAPON_LEVEL = 7; // 最大を7に変更
 
+        // ゲームの状態管理用
+        let gameSpeed = 1.0;       // ゲーム速度係数
+        let isBossWarning = false; // 警告演出中フラグ
+        let warningTimer = 0;      // 演出用タイマー
+
+        // ボスが出現する予定の座標を一時保存する変数
+        let nextBossSpawnX = 0;
+        let nextBossSpawnY = 0;
+
+        // ★追加：カメラのズーム倍率（1.0 = 通常、0.75 = 縮小）
+        let cameraScale = 1.0;
+
         // --- ステージ・難易度設定 ---
         let currentStage = 1; // 1からスタート
         const ENEMIES_BASE_COUNT = 5; // ステージ1の基本敵数
@@ -969,6 +982,9 @@
 
         // 背景グリッド線の間隔（小さいほど網目が細かくなる）
         const GRID_SPACING = 25;
+
+        // 自機の移動速度
+        const PLAYER_BASE_SPEED = 7.8; 
 
         // --- 敵の移動速度設定 ---
         const ENEMY_SPEEDS = {
@@ -1157,6 +1173,7 @@
             stages: ['audio/Neon_Gravity_00.mp3', 'audio/Neon_Gravity_01.mp3', 'audio/Neon_Gravity_02.mp3', 'audio/Neon_Gravity_03.mp3']
         };
 
+
         const AudioSys = {
             ctx: null, bgmEl: null, currentSrc: null, noiseBuffer: null,
             init() {
@@ -1190,6 +1207,22 @@
                     o.connect(g);
                     o.start(t);
                     o.stop(t + 0.1);
+                } else if (type === 'warning') {
+                    const o = this.ctx.createOscillator();
+                    o.type = 'sawtooth'; // ノコギリ波（警告音らしいきつい音）
+
+                    // 周波数をスイープさせる（低い音から高い音へ）
+                    o.frequency.setValueAtTime(400, t);
+                    o.frequency.linearRampToValueAtTime(800, t + 0.6); // 0.6秒かけて上がる
+
+                    // 音量設定
+                    g.gain.setValueAtTime(0.1, t);
+                    g.gain.linearRampToValueAtTime(0.1, t + 0.5);
+                    g.gain.linearRampToValueAtTime(0, t + 0.6); // 最後は消す
+
+                    o.connect(g);
+                    o.start(t);
+                    o.stop(t + 0.6);
                 } else if (type === 'laser') {
                     const o = this.ctx.createOscillator(); o.type = 'sawtooth';
                     o.frequency.setValueAtTime(120, t); o.frequency.linearRampToValueAtTime(80, t + 0.15);
@@ -1628,6 +1661,31 @@
             if (ui.btnOst) ui.btnOst.style.display = 'none';
         }
 
+        function triggerBossEncounter() {
+            if (isBossWarning) return; // 二重発動防止
+
+            isBossWarning = true;
+
+            // エリア中央へのベクトルを使って出現位置を決める（NaN防止）
+            const centerX = worldSize / 2;
+            const centerY = worldSize / 2;
+            const dx = centerX - player.x;
+            const dy = centerY - player.y;
+            const distToCenter = Math.hypot(dx, dy) || 1;
+
+            // プレイヤーから300px中央に寄った位置
+            const spawnDist = 300;
+            let tx = player.x + (dx / distToCenter) * spawnDist;
+            let ty = player.y + (dy / distToCenter) * spawnDist;
+
+            // 厳格なクランプ（マージンを多めにとる）
+            const margin = 300;
+            nextBossSpawnX = Math.max(margin, Math.min(worldSize - margin, tx));
+            nextBossSpawnY = Math.max(margin, Math.min(worldSize - margin, ty));
+
+            gameSpeed = 1;
+            warningTimer = 180;
+        }
 
         // =========================================================
         // 5. メインループ (Main Loop)
@@ -1649,72 +1707,88 @@
         }
 
         function update() {
+
+            // --- 警告演出の管理 ---
+            if (isBossWarning) {
+                // ... (警告処理の中身はそのまま) ...
+                if (warningTimer % 60 === 0) AudioSys.playSE('warning');
+                warningTimer--;
+                if (warningTimer <= 0) {
+                    isBossWarning = false;
+                    gameSpeed = 1.0;
+                    wormholes.unshift({ x: nextBossSpawnX, y: nextBossSpawnY, life: 300, maxLife: 300, active: true });
+                    spawnEnemy(nextBossSpawnX, nextBossSpawnY, 'boss');
+                    distortGrid(nextBossSpawnX, nextBossSpawnY, 250, 400);
+                }
+            }
+
             frame++;
 
+            // --- プレイヤー座標の安全装置 ---
             if (!Number.isFinite(player.x)) { player.x = worldSize / 2; player.y = worldSize / 2; player.vx = 0; player.vy = 0; }
 
-            // Controls
+            // --- コントロール入力と移動 ---
             let mx = input.keys['ArrowLeft'] ? -1 : input.keys['ArrowRight'] ? 1 : input.move.x;
             let my = input.keys['ArrowUp'] ? -1 : input.keys['ArrowDown'] ? 1 : input.move.y;
             const mag = Math.hypot(mx, my); if (mag > 1) { mx /= mag; my /= mag; }
-            player.vx = mx * 7.8 * SPEED_SCALE; player.vy = my * 7.8 * SPEED_SCALE;
-            player.x += player.vx; player.y += player.vy;
+            player.vx = mx * PLAYER_BASE_SPEED * SPEED_SCALE * gameSpeed;
+            player.vy = my * PLAYER_BASE_SPEED * SPEED_SCALE * gameSpeed;
+            player.x += player.vx;
+            player.y += player.vy;
 
             // 履歴（残像用）の更新
             player.history.unshift({ x: player.x, y: player.y, angle: player.angle });
             if (player.history.length > 10) player.history.pop();
 
-            // 壁の衝突判定
+            // 壁の衝突判定（自機）
             if (player.x < WALL_MARGIN) player.x = WALL_MARGIN; if (player.x > worldSize - WALL_MARGIN) player.x = worldSize - WALL_MARGIN;
             if (player.y < WALL_MARGIN) player.y = WALL_MARGIN; if (player.y > worldSize - WALL_MARGIN) player.y = worldSize - WALL_MARGIN;
-            camera.x = player.x - width / 2; camera.y = player.y - height / 2;
 
-            // 向きと射撃
+
+            // --- ★修正：カメラ更新処理を関数呼び出しに置き換え ---
+            updateCamera();
+
+
+            // --- 向きと射撃 ---
             if (input.aim.active) player.angle = Math.atan2(input.aim.y, input.aim.x);
             else if (Math.hypot(mx, my) > 0.1) player.angle = Math.atan2(my, mx);
 
             const fireInterval = player.laserTimer > 0 ? 4 : 6;
             if ((input.aim.active || input.keys['Space'] || input.keys['KeyZ']) && frame % fireInterval === 0) fire();
 
+            // ... (以下、ワームホール生成ロジックや各update処理はそのまま) ...
 
-
-            // --- ★修正：ワームホール生成ロジックの強化と制限 ---
+            // --- ワームホール生成ロジック ---
             const maxWormholes = SPAWN_SETTINGS.MAX_WORMHOLES_BASE + stage * 1.5;
             const activeWormholes = wormholes.filter(w => w.active).length;
-
-            // 現在のステージの最大同時出現数を取得（設定がない場合はデフォルト40）
             const currentMaxOnScreen = STAGE_MAX_ON_SCREEN[stage - 1] || 40;
 
-            // 基本の生成条件
-            let shouldSpawnWormhole =
-                spawnedCount < enemiesToSpawn &&
-                activeWormholes < maxWormholes &&
-                enemies.length < currentMaxOnScreen && // ★ここを追加：画面内の敵が規定数より少ない時だけ出す
-                Math.random() < SPAWN_SETTINGS.WORMHOLE_CHANCE;
+            let shouldSpawnWormhole = !isBossWarning && spawnedCount < enemiesToSpawn && activeWormholes < maxWormholes && enemies.length < currentMaxOnScreen && Math.random() < SPAWN_SETTINGS.WORMHOLE_CHANCE;
+            if (enemies.length === 0 && activeWormholes === 0 && spawnedCount < enemiesToSpawn) shouldSpawnWormhole = true;
+            if (shouldSpawnWormhole) spawnWormhole();
 
-            // ★救済措置：敵もワームホールもいないのに、まだ出すべき敵が残っている場合は強制生成
-            // (制限にかかっていても、敵がゼロなら出す必要がある)
-            if (enemies.length === 0 && activeWormholes === 0 && spawnedCount < enemiesToSpawn) {
-                shouldSpawnWormhole = true;
-            }
-
-            if (shouldSpawnWormhole) {
-                spawnWormhole();
-            }
-
-
-
+            // --- ワームホールの更新 ---
             wormholes.forEach((w) => {
+                // ... (省略) ...
                 w.life--;
                 if (w.active) {
-                    if (w.life > 60 && w.life % SPAWN_SETTINGS.SPAWN_INTERVAL === 0 && spawnedCount < enemiesToSpawn) {
-                        const remaining = enemiesToSpawn - spawnedCount;
-                        const threshold = Math.floor(enemiesToSpawn / 5);
+                    if (w.life > 60 && w.life % SPAWN_SETTINGS.SPAWN_INTERVAL === 0) {
 
-                        if (!isBossSpawned && remaining <= threshold) {
-                            spawnEnemy(w.x, w.y, 'boss');
-                            isBossSpawned = true;
-                        } else {
+                        const remaining = enemiesToSpawn - spawnedCount;
+                        const threshold = enemiesToSpawn * 0.2;
+
+                        // ★修正ポイント：ボス出現判定を「外側」に出し、条件を強化
+                        if (!isBossSpawned) {
+                            // 残りが20%以下、またはすでにノルマ数に達してしまった場合
+                            if (remaining <= threshold || spawnedCount >= enemiesToSpawn) {
+                                triggerBossEncounter();
+                                isBossSpawned = true;
+                                return; // このワームホールからの今回のスポーンは終了
+                            }
+                        }
+
+                        // ボスが出ていない判定を通過し、かつノルマが残っている場合のみ雑魚を出す
+                        if (spawnedCount < enemiesToSpawn) {
                             if (Math.random() < 0.15) {
                                 spawnEnemy(w.x, w.y, 'cube');
                             } else {
@@ -1725,7 +1799,6 @@
                         }
                     }
                     if (w.life <= 0) w.active = false;
-
                     const dx = player.x - w.x; const dy = player.y - w.y;
                     const d = Math.hypot(dx, dy) || 0.01;
                     if (d < 180) { const f = 500 / (d + 1); player.x += (dx / d) * f * 0.01; player.y += (dy / d) * f * 0.01; }
@@ -1733,7 +1806,7 @@
             });
             wormholes = wormholes.filter(w => w.life > -60);
 
-            // サテライトの更新
+            // --- サテライトの更新 ---
             player.satellites.forEach((s, i) => {
                 s.angle = (s.angle || 0) + 0.15;
                 const rad = 45 * G_SCALE;
@@ -1741,12 +1814,70 @@
                 s.x = player.x + Math.cos(s.angle + off) * rad; s.y = player.y + Math.sin(s.angle + off) * rad;
             });
 
-            // 各種エンティティ・システムの更新
+            // --- 各種エンティティ・システムの更新 ---
             updateEntities();
             updateGrid();
             updateScorePopups();
             checkStageClear();
             updateUI();
+        }
+
+        function updateCamera() {
+            let targetScale = 1.0;
+            let focusX = player.x;
+            let focusY = player.y;
+
+            const boss = enemies.find(e => e.type === 'boss');
+
+            // ★修正：ボスが存在し、かつ「出現演出中(isSpawning)ではない」時のみフォーカス計算を行う
+            if (boss && !boss.isSpawning && Number.isFinite(boss.x) && Number.isFinite(boss.y)) {
+                const dist = Math.hypot(player.x - boss.x, player.y - boss.y);
+                const maxDist = 2000;
+                const ratio = Math.min(dist / maxDist, 1.0);
+
+                targetScale = 1.0 - (ratio * 0.8);
+                const bias = ratio * 0.45;
+
+                // 計算結果が正常な時のみフォーカスを更新
+                const nextFocusX = player.x + (boss.x - player.x) * bias;
+                const nextFocusY = player.y + (boss.y - player.y) * bias;
+
+                if (Number.isFinite(nextFocusX)) focusX = nextFocusX;
+                if (Number.isFinite(nextFocusY)) focusY = nextFocusY;
+            } else {
+                // ボスがいない、または出現演出中の場合はズームしない（等倍）
+                targetScale = 1.0;
+            }
+
+            // スケールの適用（0.03で滑らかに）
+            cameraScale += (targetScale - cameraScale) * 0.03;
+
+            const viewW = width / cameraScale;
+            const viewH = height / cameraScale;
+
+            let camX = focusX - viewW / 2;
+            let camY = focusY - viewH / 2;
+
+            // 余白設定
+            let padX = 150 / cameraScale;
+            let padY = 110 / cameraScale;
+            if (height > width) { padX = 0; } else { padY = 0; }
+
+            // クランプ処理
+            if (viewW < worldSize) {
+                camX = Math.max(-padX, Math.min(worldSize - viewW + padX, camX));
+            } else {
+                camX = (worldSize - viewW) / 2;
+            }
+
+            if (viewH < worldSize) {
+                camY = Math.max(-padY, Math.min(worldSize - viewH + padY, camY));
+            } else {
+                camY = (worldSize - viewH) / 2;
+            }
+
+            camera.x = camX;
+            camera.y = camY;
         }
 
         function updateDying() {
@@ -2061,13 +2192,18 @@
                 const variant = BOSS_VARIANTS[variantIndex];
                 const bossHp = variant.hp + (stage - 1) * 10;
 
+                // --- 安全策：座標を確実に数値化する ---
+                const startX = Number(x) || worldSize / 2;
+                const startY = Number(y) || worldSize / 2;
+
                 // --- ボスのドロップ品をフラグに基づいて決定する（既存ロジック） ---
                 let bossDropItem = 'shield';
 
                 enemies.push({
-                    x: x, y: y,
-                    vx: vx * 0.2,
-                    vy: vy * 0.2,
+                    x: startX,
+                    y: startY,
+                    vx: 0,
+                    vy: 0,
                     hp: bossHp, maxHp: bossHp,
                     speed: 1.2 * variant.speedFactor * spd * stageMag,
                     color: variant.color,
@@ -2190,7 +2326,8 @@
             const rotatedOffX = e.formOffset.x * Math.cos(la) - e.formOffset.y * Math.sin(la);
             const rotatedOffY = e.formOffset.x * Math.sin(la) + e.formOffset.y * Math.cos(la);
             const targetX = e.leader.x + rotatedOffX; const targetY = e.leader.y + rotatedOffY;
-            e.x += (targetX - e.x) * 0.3; e.y += (targetY - e.y) * 0.3;
+            e.x += (targetX - e.x) * 0.3 * gameSpeed;
+            e.y += (targetY - e.y) * 0.3 * gameSpeed;
             e.vx = e.leader.vx; e.vy = e.leader.vy; e.angle = la;
         }
 
@@ -2500,8 +2637,8 @@
                 }
 
                 // 座標更新
-                e.x += e.vx;
-                e.y += e.vy;
+                e.x += e.vx * gameSpeed;
+                e.y += e.vy * gameSpeed;
             }
 
             // --- 3. 演出更新 ---
@@ -2514,7 +2651,9 @@
             const dx = player.x - e.x, dy = player.y - e.y, d = Math.hypot(dx, dy) || 0.001;
             e.vx += (dx / d) * 0.2 * SPEED_SCALE; e.vy += (dy / d) * 0.2 * SPEED_SCALE;
             const cv = Math.hypot(e.vx, e.vy); if (cv > e.speed) { e.vx = (e.vx / cv) * e.speed; e.vy = (e.vy / cv) * e.speed; }
-            e.x += e.vx; e.y += e.vy; e.angle = Math.atan2(dy, dx);
+            e.x += e.vx * gameSpeed;
+            e.y += e.vy * gameSpeed;
+            e.angle = Math.atan2(dy, dx);
             e.history.unshift({ x: e.x, y: e.y }); if (e.history.length > 60) e.history.pop();
         }
 
@@ -2534,7 +2673,8 @@
                 const cv = Math.hypot(e.vx, e.vy);
                 e.vx = (e.vx / cv) * lim; e.vy = (e.vy / cv) * lim;
             }
-            e.x += e.vx; e.y += e.vy;
+            e.x += e.vx * gameSpeed;
+            e.y += e.vy * gameSpeed;
             e.angle = Math.atan2(e.vy, e.vx);
 
             // 2. ★体節の滑らかな連結追従ロジック
@@ -2586,7 +2726,10 @@
             const dx = player.x - e.x, dy = player.y - e.y, d = Math.hypot(dx, dy) || 0.001;
             e.vx += (dx / d) * 0.2 * SPEED_SCALE; e.vy += (dy / d) * 0.2 * SPEED_SCALE;
             const cv = Math.hypot(e.vx, e.vy); if (cv > e.speed) { e.vx = (e.vx / cv) * e.speed; e.vy = (e.vy / cv) * e.speed; }
-            e.x += e.vx; e.y += e.vy; e.rotX += 0.03; e.rotY += 0.04;
+            e.x += e.vx * gameSpeed;
+            e.y += e.vy * gameSpeed;
+            e.rotX += 0.03;
+            e.rotY += 0.04;
         }
 
         function updateHunterAI(e) {
@@ -2679,8 +2822,8 @@
                 e.vy = (e.vy / currentSpeed) * maxLimit;
             }
 
-            e.x += e.vx;
-            e.y += e.vy;
+            e.x += e.vx * gameSpeed;
+            e.y += e.vy * gameSpeed;
         }
 
         function updateAsteroidAI(e) {
@@ -2732,14 +2875,14 @@
                 }
 
                 // 移動
-                e.x += e.vx;
-                e.y += e.vy;
+                e.x += e.vx * gameSpeed;
+                e.y += e.vy * gameSpeed;
 
             } else {
                 // --- 通常モード（漂流） ---
                 // 以前のロジック：e.vx * e.speed で移動
-                e.x += e.vx * e.speed;
-                e.y += e.vy * e.speed;
+                e.x += e.vx * e.speed * gameSpeed;
+                e.y += e.vy * e.speed * gameSpeed;
 
                 // 画面端の処理（漂流中のみループor反射）
                 if (e.x < 0 || e.x > worldSize) e.vx *= -1;
@@ -2751,45 +2894,65 @@
         }
 
         function updateBossAI(e) {
-            // --- ★追加：出現演出中の処理 ---
+            // --- 1. 出現演出中の処理 ---
             if (e.isSpawning) {
                 e.spawnTimer++;
+                // 出現中は物理演算を完全に止める
+                e.vx = 0;
+                e.vy = 0;
 
-                // 演出完了判定
                 if (e.spawnTimer >= e.spawnMax) {
                     e.isSpawning = false;
-                    // 実体化した瞬間に衝撃波（オプション）
+                    // ★重要：演出終了の瞬間に速度を改めてリセットし、NaN混入を防ぐ
+                    e.vx = 0;
+                    e.vy = 0;
                     if (typeof distortGrid === 'function') distortGrid(e.x, e.y, 200, 300);
                 }
-                return; // 出現中は移動・攻撃ロジックを実行しない
+                return;
             }
-            // ----------------------------
 
-            // --- 1. 移動ロジック ---
+            // 万が一数値が壊れた場合の緊急復帰
+            if (!Number.isFinite(e.x)) e.x = worldSize / 2;
+            if (!Number.isFinite(e.y)) e.y = worldSize / 2;
+
+            // --- 2. 移動ロジック ---
             const dx = player.x - e.x, dy = player.y - e.y;
-            const d = Math.hypot(dx, dy) || 0.001;
+            const d = Math.hypot(dx, dy) || 0.1; // 0除算防止
+
             e.vx += (dx / d) * 0.02 * SPEED_SCALE;
             e.vy += (dy / d) * 0.02 * SPEED_SCALE;
-            const cv = Math.hypot(e.vx, e.vy);
-            if (cv > e.speed) { e.vx = (e.vx / cv) * e.speed; e.vy = (e.vy / cv) * e.speed; }
-            e.x += e.vx; e.y += e.vy;
 
-            // --- 2. 高速回転・停止・発射・硬直ロジック ---
+            const cv = Math.hypot(e.vx, e.vy);
+            if (cv > e.speed) {
+                e.vx = (e.vx / cv) * e.speed;
+                e.vy = (e.vy / cv) * e.speed;
+            }
+
+            e.x += e.vx * gameSpeed;
+            e.y += e.vy * gameSpeed;
+
+            // エリア内クランプ
+            const margin = 100;
+            e.x = Math.max(margin, Math.min(worldSize - margin, e.x));
+            e.y = Math.max(margin, Math.min(worldSize - margin, e.y));
+
+
+            // --- 3. 高速回転・停止・発射・硬直ロジック ---
             e.fireTimer++;
 
-            const maxCycle = 280;   // 全体のサイクルを少し長めに設定
-            const brakeStart = 160; // 減速開始タイミング
-            const fireTime = 220;   // 発射タイミング（ここで完全に止まる）
-            const restartTime = 250; // 硬直が解けて再回転するタイミング
+            const maxCycle = 280;
+            const brakeStart = 160;
+            const fireTime = 220;
+            const restartTime = 250;
 
-            let rotationSpeed = 0.08; // 通常時の高速回転
+            let rotationSpeed = 0.08;
 
             if (e.fireTimer > brakeStart && e.fireTimer < fireTime) {
-                // 【減速フェーズ】発射に向けてゆっくりに
+                // 【減速フェーズ】
                 const ratio = 1.0 - (e.fireTimer - brakeStart) / (fireTime - brakeStart);
                 rotationSpeed = Math.pow(ratio, 1.5) * 0.08;
 
-                // エネルギー収束パーティクル
+                // 収束パーティクル
                 if (frame % 3 === 0) {
                     const ang = Math.random() * Math.PI * 2;
                     particles.push({
@@ -2800,31 +2963,35 @@
                 }
             }
             else if (e.fireTimer >= fireTime && e.fireTimer < restartTime) {
-                // 【発射＆硬直フェーズ】完全に停止
+                // 【発射＆硬直フェーズ】
                 rotationSpeed = 0;
 
-                // 発射の瞬間（fireTime ぴったり）に弾を生成
                 if (e.fireTimer === fireTime) {
                     const sides = e.variant.sides;
-                    //camera.x += (Math.random() - 0.5) * 30; // 強い衝撃
-                    //camera.y += (Math.random() - 0.5) * 30;
+                    const bulletSpd = ENEMY_SPEEDS.BOSS_MISSILE * SPEED_SCALE;
 
                     for (let i = 0; i < sides; i++) {
                         const a = e.angle + (Math.PI * 2 / sides) * i;
                         enemyBullets.push({
-                            x: e.x + Math.cos(a) * 60, y: e.y + Math.sin(a) * 60,
-                            vx: Math.cos(a) * ENEMY_SPEEDS.BOSS_MISSILE * SPEED_SCALE,
-                            vy: Math.sin(a) * ENEMY_SPEEDS.BOSS_MISSILE * SPEED_SCALE,
-                            life: 300, isMissile: true, color: e.color
+                            x: e.x + Math.cos(a) * 60,
+                            y: e.y + Math.sin(a) * 60,
+                            vx: Math.cos(a) * bulletSpd,
+                            vy: Math.sin(a) * bulletSpd,
+                            life: 300,
+                            isMissile: true,
+                            color: e.color
                         });
                     }
                     AudioSys.playSE('launch');
                     rings.push({ x: e.x, y: e.y, r: 20, color: '#fff', life: 1.0 });
                     rings.push({ x: e.x, y: e.y, r: 100, color: e.color, life: 0.8 });
+
+                    // 発射時に画面を少し揺らす（カメラ座標系がズレないよう控えめに）
+                    distortGrid(e.x, e.y, 100, 200);
                 }
             }
             else if (e.fireTimer >= restartTime) {
-                // 【再始動フェーズ】徐々に元の回転速度に戻る
+                // 【再始動フェーズ】
                 const ratio = (e.fireTimer - restartTime) / (maxCycle - restartTime);
                 rotationSpeed = Math.pow(ratio, 2) * 0.08;
             }
@@ -2832,7 +2999,6 @@
             e.angle += rotationSpeed;
             if (e.fireTimer >= maxCycle) e.fireTimer = 0;
         }
-
 
         // =========================================================
         // 9. エンティティ更新 (Entity Updates)
@@ -2851,8 +3017,8 @@
 
         function updatePlayerBullets() {
             bullets.forEach(b => {
-                b.x += b.vx;
-                b.y += b.vy;
+                b.x += b.vx * gameSpeed;
+                b.y += b.vy * gameSpeed;
                 b.life--;
 
                 // --- ワールド境界との衝突判定 ---
@@ -3041,8 +3207,8 @@
                 const oldY = eb.y;
 
                 // 1. 移動処理
-                eb.x += eb.vx;
-                eb.y += eb.vy;
+                eb.x += eb.vx * gameSpeed;
+                eb.y += eb.vy * gameSpeed;
                 eb.life--;
 
                 // --- ★追加：ワールド境界との衝突判定 ---
@@ -3168,8 +3334,8 @@
                 }
 
                 // 移動
-                m.x += m.vx;
-                m.y += m.vy;
+                m.x += m.vx * gameSpeed;
+                m.y += m.vy * gameSpeed;
                 m.life--;
 
                 // --- 4. 壁衝突判定 ---
@@ -3227,8 +3393,8 @@
                 c.vy = (c.vy || 0) * 0.95;
 
                 // 初速にも SPEED_SCALE を適用して移動させる
-                c.x += c.vx * SPEED_SCALE;
-                c.y += c.vy * SPEED_SCALE;
+                c.x += c.vx * SPEED_SCALE * gameSpeed; 
+                c.y += c.vy * SPEED_SCALE * gameSpeed; 
 
                 // --- 2. 自機への吸い寄せ（マグネット） ---
                 const dx = player.x - c.x;
@@ -3282,7 +3448,7 @@
                 if (p.type === 'level') {
                     // 遠くても確実に自機へ向かう（距離に応じた加速）
                     const pullSpeed = (2.0 + (dist * 0.04)) * SPEED_SCALE;
-                    const moveAmount = Math.min(dist, pullSpeed);
+                    const moveAmount = Math.min(dist, pullSpeed) * gameSpeed;
 
                     p.x += (dx / dist) * moveAmount;
                     p.y += (dy / dist) * moveAmount;
@@ -3349,9 +3515,19 @@
         function updateScorePopups() { scorePopups.forEach(s => { s.y += s.vy; s.life--; s.alpha = s.life / 30; }); scorePopups = scorePopups.filter(s => s.life > 0); }
 
         function updateParticlesAndRings() {
-            particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.vx *= 0.92; p.vy *= 0.92; p.vy += 0.005; p.life -= 0.02; });
+            particles.forEach(p => {
+                p.x += p.vx * gameSpeed;
+                p.y += p.vy * gameSpeed;
+                p.vx *= 0.92;
+                p.vy *= 0.92;
+                p.vy += 0.005;
+                p.life -= 0.02;
+            });
             particles = particles.filter(p => p.life > 0);
-            rings.forEach(r => { r.r += 2; r.life -= 0.02; });
+            rings.forEach(r => {
+                r.r += 2 * gameSpeed;
+                r.life -= 0.02 * gameSpeed;
+            });
             rings = rings.filter(r => r.life > 0);
         }
 
@@ -3385,8 +3561,8 @@
                         p.x = p.ox; p.y = p.oy;
                         p.vx = 0; p.vy = 0;
                     } else {
-                        p.x += p.vx;
-                        p.y += p.vy;
+                        p.x += p.vx * gameSpeed;
+                        p.y += p.vy * gameSpeed;
                     }
                 }
             }
@@ -3404,7 +3580,12 @@
         // 10. 描画システム (Rendering Systems)
         // =========================================================
         function draw() {
-            ctx.save(); ctx.translate(-camera.x, -camera.y);
+
+            ctx.save();
+
+            ctx.scale(cameraScale, cameraScale);
+            ctx.translate(-camera.x, -camera.y);
+
             ctx.fillStyle = '#fff';
             stars.forEach(s => {
                 const sx = (s.x - camera.x * s.parallax) % worldSize; const sy = (s.y - camera.y * s.parallax) % worldSize;
@@ -3421,10 +3602,17 @@
             ctx.shadowColor = '#08f';
 
             ctx.beginPath();
-            const viewX = camera.x; const viewY = camera.y; const viewW = width; const viewH = height;
+            const viewX = camera.x;
+            const viewY = camera.y;
+            const viewW = width / cameraScale;
+            const viewH = height / cameraScale;
+
             for (let i = 0; i < gridPoints.length; i++) for (let j = 0; j < gridPoints[i].length; j++) {
                 const p = gridPoints[i][j]; if (!p) continue;
+
+                // 画面外判定（これで途切れなくなります）
                 if (p.x < viewX - 50 || p.x > viewX + viewW + 50 || p.y < viewY - 50 || p.y > viewY + viewH + 50) continue;
+
                 if (i > 0 && gridPoints[i - 1] && gridPoints[i - 1][j]) { ctx.moveTo(gridPoints[i - 1][j].x, gridPoints[i - 1][j].y); ctx.lineTo(p.x, p.y); }
                 if (j > 0 && gridPoints[i][j - 1]) { ctx.moveTo(gridPoints[i][j - 1].x, gridPoints[i][j - 1].y); ctx.lineTo(p.x, p.y); }
             }
@@ -3610,7 +3798,11 @@
                 drawMiniMap();
             }
 
-            drawScorePopups(); ctx.restore();
+            drawScorePopups();
+            ctx.restore();
+
+            // WARNING演出の描画 (画面固定座標) ---
+            drawBossWarningEffect();
         }
 
         // player
@@ -4707,6 +4899,85 @@
                     size: (Math.random() * 3 + 1) * G_SCALE,
                     life: 1.0 + Math.random() * 0.5
                 });
+            }
+        }
+
+        function drawBossWarningEffect() {
+            if (!isBossWarning) return;
+
+            // これから出現するボスの色を取得
+            const variantIndex = (stage - 1) % BOSS_VARIANTS.length;
+            const bossColor = BOSS_VARIANTS[variantIndex].color;
+
+            // --- 1. 出現予定地点にターゲットサイトを描画 ---
+            ctx.save();
+
+            ctx.scale(cameraScale, cameraScale);
+
+            ctx.translate(-camera.x, -camera.y);
+
+            const p = warningTimer / 180;
+            ctx.strokeStyle = bossColor;
+            ctx.lineWidth = 2;
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = bossColor;
+            ctx.beginPath();
+            ctx.arc(nextBossSpawnX, nextBossSpawnY, 50 + p * 200, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.beginPath();
+            const crossSize = 10;
+            ctx.moveTo(nextBossSpawnX - crossSize, nextBossSpawnY);
+            ctx.lineTo(nextBossSpawnX + crossSize, nextBossSpawnY);
+            ctx.moveTo(nextBossSpawnX, nextBossSpawnY - crossSize);
+            ctx.lineTo(nextBossSpawnX, nextBossSpawnY + crossSize);
+            ctx.stroke();
+            ctx.restore();
+
+            // --- 2. 警告メッセージの描画 (BOSS HPバーの位置に合わせる) ---
+            if (warningTimer > 20 && Math.floor(warningTimer / 30) % 2 !== 0) {
+                ctx.save();
+                ctx.globalCompositeOperation = 'source-over';
+
+                // 右端の余白設定（CSSのpadding等に合わせる）
+                const marginRight = 10;
+                const x = width - marginRight;
+
+                // 表示位置：SHIELD(約40px) + ENEMY(約40px) = 80px 以上の高さから開始
+                // boss-ui-containerが出る想定位置 (110〜120pxあたり)
+                const y = 115;
+
+                // ボスHPバーと同じ幅 (gauge-boxのwidth: 120px)
+                const boxW = 120;
+                const boxH = 45;
+
+                // 背景ボックス
+                ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
+                ctx.fillRect(x - boxW, y, boxW, boxH);
+
+                // ボスカラーのサイドバー
+                ctx.fillStyle = bossColor;
+                ctx.fillRect(x - boxW, y, 3, boxH);
+
+                ctx.textAlign = "right";
+                ctx.textBaseline = "top";
+
+                // "WARNING !!" 
+                // 幅に合わせてフォントサイズを微調整 (16px)
+                ctx.font = "900 16px Orbitron, sans-serif";
+                ctx.fillStyle = "#ff0000";
+                ctx.shadowColor = "#ff0000";
+                ctx.shadowBlur = 8;
+                ctx.fillText("WARNING !!", x - 5, y + 5);
+
+                // サブメッセージ
+                ctx.font = "700 8px Orbitron, sans-serif";
+                ctx.fillStyle = "#ffffff";
+                ctx.shadowBlur = 0;
+                ctx.globalAlpha = 0.8;
+                const msg = "BOSS APPROACHING";
+                ctx.fillText(msg, x - 5, y + 26);
+
+                ctx.restore();
             }
         }
 
