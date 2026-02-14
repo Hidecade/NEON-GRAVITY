@@ -1561,33 +1561,30 @@
         }
 
         function checkStageClear() {
-            // 画面上の脅威チェック
-            // enemies配列の中にアステロイドも含まれているため、noEnemiesチェックでカバーされます
+            // 1. 画面上の脅威（敵・ボス・アステロイドすべて）が消滅したか
+            // enemies配列にすべて集約されているため、このlengthチェックが最も重要です
             const noEnemies = enemies.length === 0;
-            const noBosses = (typeof bosses !== 'undefined') ? bosses.length === 0 : true;
-            const noHomings = (typeof bossHomings !== 'undefined') ? bossHomings.length === 0 : true;
 
-            // ★重要：アステロイドが分裂して増えても、enemies.length が 0 になるまでクリアになりません
-
+            // 2. 出現口（ワームホール）がすべて閉じたか
             const noWormholes = wormholes.filter(w => w.active).length === 0;
 
-            // 1. ノルマ達成クリア (アステロイド以外の撃破数で判定)
-            const normalClear = enemiesKilled >= enemiesToSpawn;
+            // 3. ボスが既に出現したか（ボスが出る前に雑魚が全滅してクリアになるのを防ぐ）
+            const bossWasSpawned = isBossSpawned;
 
-            // 2. 救済クリア (出し切ったはずなのに敵がいない場合)
-            const fieldClean = noEnemies && noBosses && noHomings && noWormholes;
-            const spawnComplete = spawnedCount >= enemiesToSpawn;
-
-            // 判定
-            if (!isStageClear && fieldClean && (normalClear || spawnComplete)) {
+            // 4. クリア判定
+            // ボスを倒した瞬間に全敵をHP0にしているため、
+            // 「ボス出現済み」かつ「敵がゼロ（自爆完了）」かつ「ワームホールなし」でクリア
+            if (!isStageClear && noEnemies && noWormholes && bossWasSpawned) {
                 isStageClear = true;
 
                 if (stage === MAX_STAGE) {
                     showEnding();
                 } else {
+                    // クリアメッセージ表示とBGM再生
                     ui.msg.style.display = 'block';
                     AudioSys.playBGM('clear');
 
+                    // 4秒後に次ステージへ
                     setTimeout(() => {
                         stage++;
                         ui.stage.innerText = stage;
@@ -1857,77 +1854,74 @@
             const boss = enemies.find(e => e.type === 'boss');
 
             if (boss && Number.isFinite(boss.x)) {
+                // 1. タイマーの進行（演出時間より少し長く取ることで、定着をよりマイルドにする）
+                const smoothMax = boss.spawnMax + 20;
+                if (boss.cameraLerpTimer < smoothMax) {
+                    boss.cameraLerpTimer++;
+                }
+
+                const t = boss.cameraLerpTimer / smoothMax;
+                // 進行度を5乗に強化。開始直後にさらに高速にズームアウトさせ、後半をより平坦にする
+                const camT = 1 - Math.pow(1 - t, 5);
+
                 const dist = Math.hypot(player.x - boss.x, player.y - boss.y) || 0.1;
-                const maxDist = 2000;
+                const maxDist = 2200; // 少し広めにとる
                 const ratio = Math.min(dist / maxDist, 1.0);
 
-                // 1. 出現演出の進行度（早回しカーブ）
-                const t = boss.isSpawning ? (boss.spawnTimer / boss.spawnMax) : 1.0;
-                const camT = 1 - Math.pow(1 - t, 4);
-
                 // 2. ズーム目標値の計算
-                // 最大で0.2倍まで引く
                 targetScale = 1.0 - (ratio * 0.8 * camT);
 
-                // 3. 基本フォーカス位置（プレイヤーとボスの中間）
+                // 3. フォーカス位置のブレンド
+                // 出現完了（isSpawning = false）のタイミングでの「座標の飛び」を抑えるため、
+                // 常にこの計算式を使い、camTによって重み付けを完結させる。
                 const bias = ratio * 0.45 * camT;
                 focusX = player.x + (boss.x - player.x) * bias;
                 focusY = player.y + (boss.y - player.y) * bias;
             }
 
-            // カメラのスムージング更新
-            cameraScale += (targetScale - cameraScale) * 0.05;
+            // 4. スムージングの強化
+            // 0.05だと追従が鋭すぎて微細な座標変化を拾うため、0.04に落としてマイルドにします
+            cameraScale += (targetScale - cameraScale) * 0.04;
 
-            // =========================================================
-            // ★修正ポイント：ズームアウト時にフォーカスを中央へ寄せる（ワープ防止）
-            // =========================================================
-
-            // 現在のズーム度合いを 0.0(等倍) ～ 1.0(最大広角) で計算
-            // (1.0 - scale) / 0.8 で正規化
+            // 5. ズームが進むほど強制的に中央へ寄せる補正（ここがズレ防止のキモ）
             let zoomFactor = Math.max(0, Math.min(1, (1.0 - cameraScale) / 0.8));
+            // 3乗にすることで、引き切った時だけ中央吸着を最大化する
+            const centerStrength = Math.pow(zoomFactor, 3);
 
-            // ズームが進むほど、強制的に「ワールド中央」を見るようにブレンドする
-            // これにより、画面幅がワールド幅を超えた瞬間の座標ズレ（カクつき）が消滅します
-            // zoomFactorの2乗を使うことで、引き切った時だけ強く補正がかかるようにする
-            const centerStrength = Math.pow(zoomFactor, 2);
-
-            const centerX = worldSize / 2;
-            const centerY = worldSize / 2;
-
-            focusX = focusX * (1 - centerStrength) + centerX * centerStrength;
-            focusY = focusY * (1 - centerStrength) + centerY * centerStrength;
-
-            // =========================================================
+            focusX = focusX * (1 - centerStrength) + (worldSize / 2) * centerStrength;
+            focusY = focusY * (1 - centerStrength) + (worldSize / 2) * centerStrength;
 
             const viewW = width / cameraScale;
             const viewH = height / cameraScale;
 
-            let camX = focusX - viewW / 2;
-            let camY = focusY - viewH / 2;
+            // 6. 最終座標の算出
+            let tx = focusX - viewW / 2;
+            let ty = focusY - viewH / 2;
 
-            // --- クランプ処理 ---
-            let padX = 150 / cameraScale;
-            let padY = 120 / cameraScale;
+            // 7. クランプ処理の「遊び」
+            // 画面端でピタッと止まる際のショックを吸収するため、マージンにcameraScaleを干渉させない
+            let padX = 150;
+            let padY = 120;
             if (height > width) { padX = 0; } else { padY = 0; }
 
-            // 横方向のクランプ
+            // 境界チェックを強制的に行う
             if (viewW < worldSize) {
-                camX = Math.max(-padX, Math.min(worldSize - viewW + padX, camX));
+                tx = Math.max(-padX, Math.min(worldSize - viewW + padX, tx));
             } else {
-                // 画面の方が広い場合は中央揃え
-                // 上記の focusX 補正により、この計算結果と camX がほぼ一致するためズレません
-                camX = (worldSize - viewW) / 2;
+                tx = (worldSize - viewW) / 2;
             }
 
-            // 縦方向のクランプ
             if (viewH < worldSize) {
-                camY = Math.max(-padY, Math.min(worldSize - viewH + padY, camY));
+                ty = Math.max(-padY, Math.min(worldSize - viewH + padY, ty));
             } else {
-                camY = (worldSize - viewH) / 2;
+                ty = (worldSize - viewH) / 2;
             }
 
-            camera.x = camX;
-            camera.y = camY;
+            // 8. カメラ座標そのものにもスムージングをかける（これが決定打になります）
+            // 内部のフォーカス座標がわずかに跳ねても、実際の表示座標を0.1の速度で追従させることで
+            // 物理的に「ブレ」を視認不可能にします。
+            camera.x += (tx - camera.x) * 0.1;
+            camera.y += (ty - camera.y) * 0.1;
         }
 
         function updateDying() {
@@ -2255,35 +2249,26 @@
                 const variant = BOSS_VARIANTS[variantIndex];
                 const bossHp = variant.hp + (stage - 1) * 10;
 
-                // 呼び出し元の座標 (x, y) を数値として再保証
                 const sX = Number(x);
                 const sY = Number(y);
 
-                const b = {
-                    x: sX,
-                    y: sY,
-                    // 出現演出が終わるまで、この初期座標を「絶対位置」として保持させる
-                    spawnX: sX,
-                    spawnY: sY,
-                    vx: 0,
-                    vy: 0,
-                    hp: bossHp,
-                    maxHp: bossHp,
+                enemies.push({
+                    x: sX, y: sY,
+                    spawnX: sX, spawnY: sY,
+                    vx: 0, vy: 0,
+                    hp: bossHp, maxHp: bossHp,
                     speed: 1.2 * variant.speedFactor * SPEED_SCALE * (1.0 + (stage - 1) * 0.08),
                     color: variant.color,
-                    type: 'boss',
-                    variant: variant,
+                    type: 'boss', variant: variant,
                     angle: 0,
                     drop: 'shield',
                     scale: 1.5 + (variant.sides * 0.1),
-                    fireTimer: 0,
-                    flashTimer: 0,
-                    spawnTimer: 0,
-                    spawnMax: 150,
+                    fireTimer: 0, flashTimer: 0,
+                    spawnTimer: 0, spawnMax: 150,
                     isSpawning: true,
-                    focusRatio: 0,
-                };
-                enemies.push(b);
+                    // ★追加：カメラ補間専用タイマー（isSpawningが消えても止まらない）
+                    cameraLerpTimer: 0
+                });
                 spawnedCount++;
             } else if (type === 'asteroid') {
                 const sizeFactor = 1.0 + (stage - 1) * 0.1;
@@ -2369,17 +2354,13 @@
 
                 // --- 破壊判定 ---
                 if (e.hp <= 0) {
-                    // アステロイド分裂処理
-                    if (e.type === 'asteroid' && e.size < 3) {
+                    // ★修正： e.noSplit が true の時は分裂させない
+                    if (e.type === 'asteroid' && e.size < 3 && !e.noSplit) {
                         for (let i = 0; i < 2; i++) {
-                            const splitAngle = Math.random() * Math.PI * 2;
-                            const splitSpeed = 2.0;
-                            const vx = Math.cos(splitAngle) * splitSpeed;
-                            const vy = Math.sin(splitAngle) * splitSpeed;
                             spawnEnemy(e.x, e.y, 'asteroid', e.size + 1);
                         }
                     }
-                    destroyEnemy(e);
+                    destroyEnemy(e); // 爆発エフェクト発生
                 }
             });
 
@@ -2559,22 +2540,21 @@
             }
 
             // =========================================================
-            // ★追加：ボス撃破時の連鎖爆発（全敵自爆）処理
+            // ★追加：ボス撃破時の連鎖爆発（アステロイド含む）
             // =========================================================
             if (e.type === 'boss') {
-                // 1. 残っている全ての敵を道連れにする
                 enemies.forEach(other => {
-                    // 自分（ボス）以外で、まだ生きている敵
                     if (other !== e && other.hp > 0) {
-                        other.hp = 0; // HPを0にして死亡フラグを立てる
+                        other.hp = 0; // 全員のHPを0にする
 
-                        // アステロイドが分裂しないように、タイプを無効化しておく（お好みで）
-                        // これを書かないと、岩が割れて小さい岩が増えてから爆発します
-                        if (other.type === 'asteroid') other.noSplit = true;
+                        // アステロイドの場合、分裂を封じるフラグを立てる
+                        if (other.type === 'asteroid') {
+                            other.noSplit = true;
+                        }
                     }
                 });
 
-                // 2. 出現中のワームホールもすべて強制的に閉じる
+                // ワームホールも即座に消去
                 wormholes.forEach(w => w.life = 0);
             }
             // =========================================================
@@ -2983,26 +2963,25 @@
             if (e.isSpawning) {
                 e.spawnTimer++;
 
-                // 演出中は、生成時に保存した「spawnX/Y」を強制的に維持し続ける（ワープ防止）
-                e.x = e.spawnX;
-                e.y = e.spawnY;
-                e.vx = 0;
-                e.vy = 0;
-
+                // 演出が完了したか判定
                 if (e.spawnTimer >= e.spawnMax) {
                     e.isSpawning = false;
-                    // 実体化した瞬間に座標が壊れていないか最終確認
-                    if (!Number.isFinite(e.x)) e.x = worldSize / 2;
-                    if (!Number.isFinite(e.y)) e.y = worldSize / 2;
-
-                    if (typeof distortGrid === 'function') distortGrid(e.x, e.y, 200, 300);
+                    // フラグを折るだけで return しない！ 
+                    // これにより、このフレームのまま下の移動ロジックへ継続させ、
+                    // カメラとボスの座標計算を完全に同期させます。
+                } else {
+                    // 演出が続いている間だけ座標をロックして終了
+                    e.x = e.spawnX;
+                    e.y = e.spawnY;
+                    e.vx = 0;
+                    e.vy = 0;
+                    return;
                 }
-                return; // 出現中は移動計算（2.以降）を絶対に実行しない
             }
 
-            // 万が一数値が壊れた場合の緊急復帰
-            if (!Number.isFinite(e.x)) e.x = worldSize / 2;
-            if (!Number.isFinite(e.y)) e.y = worldSize / 2;
+            // --- 2. 移動ロジック (isSpawning が false になった瞬間ここを通る) ---
+            if (!Number.isFinite(e.x)) e.x = e.spawnX || worldSize / 2;
+            if (!Number.isFinite(e.y)) e.y = e.spawnY || worldSize / 2;
 
             // --- 2. 移動ロジック ---
             const dx = player.x - e.x, dy = player.y - e.y;
