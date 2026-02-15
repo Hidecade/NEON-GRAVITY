@@ -1039,7 +1039,7 @@
             // =========================================================
             const START_STAGE = 9;        // 開始ステージ番号
 
-            const MAX_STAGE = 9;          // 最大ステージ数
+            const MAX_STAGE = 1;          // 最大ステージ数
             let currentStage = 1;         // 現在のステージ番号
             let stage = 1;                // 表示上のステージ番号
             let score = 0;                // 現在のスコア
@@ -2196,14 +2196,12 @@
                         }
                     }
 
-                    // 2. 援護雑魚のスポーン（ボス生存中かつ画面内の敵が5体未満のとき）
-                    if (bossExists && enemies.length < 5 && frame % 120 === 0) {
-                        // 現在のボス番号(0-7)に対応するステージ(1-8)のエネミープールを取得
-                        // rushBossIndex は 0始まりなので +1 してステージ番号に合わせる
+                    // 2. 援護雑魚のスポーン（強化版: 1.3倍）
+                    // 画面内の敵が「7体未満」かつ「90フレーム(1.5秒)ごと」に出現
+                    if (bossExists && enemies.length < 7 && frame % 90 === 0) {
                         const currentPool = STAGE_ENEMIES[rushBossIndex + 1] || STAGE_ENEMIES[1];
                         const randomType = currentPool[Math.floor(Math.random() * currentPool.length)];
 
-                        // プレイヤーから離れた位置にワームホールを生成してスポーン
                         const angle = Math.random() * Math.PI * 2;
                         const dist = 600;
                         const sx = Math.max(100, Math.min(worldSize - 100, player.x + Math.cos(angle) * dist));
@@ -2211,7 +2209,6 @@
 
                         wormholes.push({ x: sx, y: sy, life: 100, maxLife: 100, active: true });
 
-                        // 少し遅れて敵を出す
                         setTimeout(() => {
                             if (gameState === 'PLAYING' && stage === 9) spawnEnemy(sx, sy, randomType);
                         }, 500);
@@ -2774,22 +2771,15 @@
                     spawnedCount++;
                 } else if (type === 'asteroid') {
                     // =========================================================
-                    // ★修正: ステージ9（BOSS RUSH）のみ遅くする分岐を追加
+                    // ★修正: アステロイドを通常仕様（速い・回転する）に戻す
                     // =========================================================
                     const sizeFactor = 1.0 + (stage - 1) * 0.1;
                     const hp = (size === 1 ? 4 : size === 2 ? 2 : 1) + Math.floor((stage - 1) * 0.5);
                     const baseScale = size === 1 ? 1.8 : size === 2 ? 1.1 : 0.6;
                     const finalScale = baseScale * sizeFactor;
 
-                    // ★ここが変更点
-                    // ステージ9なら係数 0.2 (重くゆっくり)、それ以外は 0.7 (元の速さ)
-                    const speedMultiplier = (stage === 9) ? 0.3 : 0.7;
-
-                    // 回転速度も同様に、ステージ9ならゆっくり、それ以外はキビキビと
-                    const rotMultiplier = (stage === 9) ? 0.05 : 0.1;
-
-                    const moveSpeed = (ENEMY_SPEEDS.ASTEROID * speedMultiplier) * (1 + size * 0.1) * spd * stageMag;
-
+                    // 通常の速度係数 (0.7) と回転速度 (0.1) に戻す
+                    const moveSpeed = (ENEMY_SPEEDS.ASTEROID * 0.7) * (1 + size * 0.4) * spd * stageMag;
                     const ang = Math.random() * Math.PI * 2;
 
                     enemies.push({
@@ -2802,7 +2792,7 @@
                         type: 'asteroid',
                         size: size,
                         angle: Math.random() * Math.PI * 2,
-                        rotSpd: (Math.random() - 0.5) * rotMultiplier, // 回転速度を適用
+                        rotSpd: (Math.random() - 0.5) * 0.1, // 速い回転
                         scale: finalScale,
                         drop: 'none',
 
@@ -3393,24 +3383,20 @@
                 // 時間経過のカウント
                 e.spawnTimer = (e.spawnTimer || 0) + 1;
 
-                // --- 覚醒判定 ---
-                // ★修正: 「stage !== 9」を追加
-                // ステージ9以外、かつ時間が経過した場合のみ追尾モードへ移行
-                if (stage !== 9 && !e.isTracking && e.spawnTimer > e.trackingStart) {
+                // --- 覚醒判定（通常仕様に戻す） ---
+                // "stage !== 9" の制限を削除。時間が来れば追尾モードへ移行。
+                if (!e.isTracking && e.spawnTimer > e.trackingStart) {
                     e.isTracking = true;
-
                     // モード切替時の速度変換と減速
                     e.vx = (e.vx * e.speed) * 0.2;
                     e.vy = (e.vy * e.speed) * 0.2;
                     e.speed = 1;
-
                     // 回転を速くする
                     e.rotSpd *= 3;
                 }
 
                 if (e.isTracking) {
                     // --- 追跡モード ---
-
                     // 色の変化（赤みがかかる）
                     const gb = Math.floor(215 + 40 * Math.sin(frame * 0.1));
                     e.color = `rgb(255, ${gb}, ${gb})`;
@@ -3435,14 +3421,7 @@
 
                 } else {
                     // --- 通常モード（漂流） ---
-
-                    // Boss Rushでは追尾しないので、アイテム岩の場合は緑色を維持する必要がある
-                    // そのため、強制的に白に戻す処理を少し変更します
-                    if (e.drop === 'shield') {
-                        e.color = '#0f0'; // アイテム岩は緑
-                    } else {
-                        e.color = '#ffffff'; // それ以外は白
-                    }
+                    e.color = '#ffffff';
 
                     e.x += e.vx * e.speed * gameSpeed;
                     e.y += e.vy * e.speed * gameSpeed;
