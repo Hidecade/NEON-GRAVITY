@@ -1917,8 +1917,14 @@
                 }
 
                 // --- ボタン処理 ---
-                // オンクリックイベントの重複登録を防ぐため、アロー関数で毎回上書きする形はOK
+                // ★追加: 二重送信を完全に防ぐためのフラグ
+                let isSubmitting = false;
+
                 ui.submitBtn.onclick = async () => {
+                    // ★追加: すでに送信処理中なら、その後のクリックは全て無視する
+                    if (isSubmitting) return;
+                    isSubmitting = true;
+
                     ui.submitBtn.style.pointerEvents = "none";
                     ui.submitBtn.innerText = "SENDING...";
                     const name = nameInp.value.trim() || "PILOT";
@@ -1940,6 +1946,9 @@
                         alert("Connection error. Please try again.");
                         ui.submitBtn.style.pointerEvents = "auto";
                         ui.submitBtn.innerText = "SUBMIT";
+
+                        // ★エラーが起きて再試行させるときだけフラグを解除する
+                        isSubmitting = false;
                     }
                 };
 
