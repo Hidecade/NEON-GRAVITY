@@ -719,6 +719,7 @@
                 margin-top: 0;
             }
         }
+
     </style>
 
 </head>
@@ -771,6 +772,10 @@
         </div>
         <div id="warning-msg">GRAVITY CRITICAL</div>
         <div id="stage-msg">STAGE CLEAR</div>
+
+
+
+
 
         <div id="ending-msg">
             <h1 style="color:#fff; font-size:30px; text-shadow:0 0 30px #0ff; margin-bottom:5px;">MISSION COMPLETE</h1>
@@ -972,11 +977,11 @@
                         const stageVal = data.stage ? "ST." + data.stage : "-";
 
                         tr.innerHTML = `
-                                            <td class="${rankClass}" style="text-align:center;">${rankText}</td>
-                                            <td style="text-align:left;">${escapeHtml(data.name)}</td>
-                                            <td style="color:#aaa; text-align:center;">${stageVal}</td>
-                                            <td style="text-align:right; color:#0ff;">${data.score.toLocaleString()}</td>
-                                        `;
+                                                <td class="${rankClass}" style="text-align:center;">${rankText}</td>
+                                                <td style="text-align:left;">${escapeHtml(data.name)}</td>
+                                                <td style="color:#aaa; text-align:center;">${stageVal}</td>
+                                                <td style="text-align:right; color:#0ff;">${data.score.toLocaleString()}</td>
+                                            `;
                         rankingBody.appendChild(tr);
                         rank++;
                     });
@@ -1031,8 +1036,6 @@
 
         let gameState = 'TITLE';      // 現在のゲーム状態 ('TITLE', 'PLAYING', 'PAUSED', 'DYING', 'GAMEOVER_UI', 'ENDING', 'OST')
         let previousGameState = '';   // ポーズ前の状態保存用
-
-
 
         // =========================================================
         // 2. ステージ・難易度・進行管理
@@ -1111,6 +1114,7 @@
         const PLAYER_BASE_SPEED = 10; // 自機の基本移動速度
         const PLAYER_BASE_SHIELD = 100; // 100
         const MAX_WEAPON_LEVEL = 7;    // 通常ショットの最大強化レベル
+        const DEFAULT_WEAPON_LEVEL = 1;    // 初期武器レベル
 
         // プレイヤーオブジェクト初期化
         const player = {
@@ -1144,7 +1148,7 @@
 
         // 敵の移動速度設定 (SPEED_SCALE適用前のベース値)
         const ENEMY_SPEEDS = {
-            TRIANGLE: 4.8,     // 紫：高速で直線的な動き
+            TRIANGLE: 8,     // 紫：高速で直線的な動き
             CUBE: 2.5,         // 緑：アイテムキャリア、動きは遅め
             TADPOLE: 12,       // 白：精子型、非常に素早い
             DRAGON: 5,         // 赤：中ボス級、最高速度が高い
@@ -1322,6 +1326,9 @@
             nameInputArea: document.getElementById("name-input-area"),
         };
 
+
+      
+
         // =========================================================
         // 2. オーディオシステム (Audio System)
         // =========================================================
@@ -1330,6 +1337,8 @@
             title: 'audio/Neon_Gravity_Title.mp3',
             clear: 'audio/Neon_Gravity_Clear.mp3',
             boss: 'audio/Neon_Gravity_Boss.mp3',
+            last: 'audio/Neon_Gravity_Last.mp3',
+            story: 'audio/Neon_Gravity_Story.mp3',
             stages: ['audio/Neon_Gravity_00.mp3', 'audio/Neon_Gravity_01.mp3', 'audio/Neon_Gravity_02.mp3', 'audio/Neon_Gravity_03.mp3']
         };
 
@@ -1500,23 +1509,53 @@
                 }
             },
 
-            playBGM(key, idx = 0) { /* (変更なし) */
+            playBGM(key, idx = 0) {
                 if (!this.bgmEl) return;
+
                 let src;
                 if (key === 'title') src = BGM_FILES.title;
                 else if (key === 'clear') src = BGM_FILES.clear;
                 else if (key === 'boss') src = BGM_FILES.boss;
+                else if (key === 'story') src = BGM_FILES.story; // ★追加
+                else if (key === 'last') src = BGM_FILES.last; // ★追加
                 else {
                     const actualIdx = idx % BGM_FILES.stages.length;
                     src = BGM_FILES.stages[actualIdx];
                 }
+
                 if (this.currentSrc === src && !this.bgmEl.paused) return;
+
+                // ★追加：進行中のフェード処理があればキャンセルする
+                clearInterval(this.bgmFadeInterval);
+
                 this.bgmEl.src = src;
                 this.bgmEl.currentTime = 0;
+
+                this.bgmEl.volume = 0.4; // 通常のゲーム中BGMの音量
                 this.bgmEl.play().catch(e => { });
+                
                 this.currentSrc = src;
             },
-            stopBGM() { if (this.bgmEl) this.bgmEl.pause(); },
+
+            fadeOutBGM() {
+                if (!this.bgmEl || this.bgmEl.paused) return;
+
+                clearInterval(this.bgmFadeInterval);
+                this.bgmFadeInterval = setInterval(() => {
+                    if (this.bgmEl.volume > 0.05) {
+                        this.bgmEl.volume -= 0.05;
+                    } else {
+                        this.bgmEl.volume = 0;
+                        this.bgmEl.pause();
+                        clearInterval(this.bgmFadeInterval);
+                    }
+                }, 100);
+            },
+
+            stopBGM() {
+                clearInterval(this.bgmFadeInterval); // フェード中でも即座に止める
+                if (this.bgmEl) this.bgmEl.pause();
+            },
             pauseBGM() { if (this.bgmEl && !this.bgmEl.paused) this.bgmEl.pause(); },
             resumeBGM() { if (this.bgmEl && this.bgmEl.paused && this.currentSrc) this.bgmEl.play().catch(() => { }); }
         };
@@ -1539,7 +1578,9 @@
                 { n: 'Stage 2', k: 'stage', i: 1 },
                 { n: 'Stage 3', k: 'stage', i: 2 },
                 { n: 'Stage 4', k: 'stage', i: 3 },
-                { n: 'Boss Theme', k: 'boss' },   // <--- ★追加
+                { n: 'Boss Theme', k: 'boss' },
+                { n: 'Last Boss Theme', k: 'last' },
+                { n: 'Story', k: 'story' },  
                 { n: 'Clear Theme', k: 'clear' }
             ];
 
@@ -1563,7 +1604,7 @@
         // =========================================================
         // 3. 初期化・システム制御 (Core Logic)
         // =========================================================
-        function init() { resize(); AudioSys.init(); }
+        function init() { resize(); AudioSys.init();  }
 
         function resize() {
             width = canvas.width = window.innerWidth;
@@ -1634,7 +1675,7 @@
             player.vx = 0;
             player.vy = 0;
             player.shield = PLAYER_BASE_SHIELD;
-            player.weaponLevel = 1;
+            player.weaponLevel = DEFAULT_WEAPON_LEVEL;
             player.satellites = [];
             player.invuln = 0;
             player.laserTimer = 0;
@@ -1697,15 +1738,14 @@
                 ui.msg.style.textShadow = "0 0 20px #f00";
                 ui.msg.style.display = 'block';
 
-                AudioSys.stopBGM();
+                AudioSys.playBGM('last');
 
                 setTimeout(() => {
                     ui.msg.style.display = 'none';
                     // ラスボス生成
                     spawnEnemy(worldSize / 2, worldSize / 2, 'battleship');
                     isBossSpawned = true;
-                    // AudioSys.playBGM('last_boss'); // 専用曲があれば
-                    AudioSys.playBGM('boss');
+                    
                 }, 4000);
 
                 enemiesToSpawn = 1;
@@ -2030,6 +2070,7 @@
                 // タイトルからの呼び出しは閉じた後何もしない(null)
                 btnRanking.onclick = () => window.showRanking(null);
             }
+
         }
 
 
@@ -2097,6 +2138,7 @@
             gameSpeed = 1;
             warningTimer = 180;
         }
+
 
         // =========================================================
         // 5. メインループ (Main Loop)
@@ -2695,8 +2737,9 @@
                 });
                 spawnedCount++;
             } else if (type === 'triangle') {
-                const forms = ['V', 'line', 'circle'];
-                const form = forms[Math.floor(Math.random() * forms.length)];
+                // フォーメーションパターンの定義
+                const patterns = ['V', 'W', 'H'];
+                const pattern = patterns[Math.floor(Math.random() * patterns.length)];
                 const initialAngle = Math.atan2(vy, vx);
 
                 const formationTypes = ['blue', 'purple', 'yellow'];
@@ -2705,11 +2748,11 @@
                 const colorMap = {
                     blue: '#00f0ff',
                     purple: '#bf00ff',
-                    yellow: '#ffdf00' // 黄色を修正
+                    yellow: '#ffdf00'
                 };
                 const selectedColor = colorMap[currentFormationType];
 
-                // --- 1. リーダーの生成 ---
+                // --- 1. リーダー（中心機）の生成 ---
                 const leader = {
                     x: x, y: y, vx: vx, vy: vy,
                     hp: 1 + Math.floor(hpMag * 0.5),
@@ -2719,10 +2762,9 @@
                     formationType: currentFormationType,
                     angle: initialAngle,
                     drop: dropType,
-                    scale: 0.1, // 出現時は小さく
+                    scale: 0.1,
                     isLeader: true,
                     followers: [],
-                    // ★出現演出用フラグ
                     isWarping: true,
                     warpPercent: 0,
                     rotX: Math.random() * Math.PI,
@@ -2732,28 +2774,33 @@
                 enemies.push(leader);
                 spawnedCount++;
 
-                // --- 2. 取り巻きの生成 ---
-                for (let i = 1; i <= 4; i++) {
+                // --- 2. 取り巻き（フォロワー）の生成 ---
+                // リーダーを中心に左右2台ずつ、計4台を配置
+                for (let i = 0; i < 4; i++) {
                     if (spawnedCount >= enemiesToSpawn) break;
 
                     let offX = 0, offY = 0;
-                    if (form === 'V') {
-                        offX = Math.ceil(i / 2) * -30;
-                        offY = (i % 2 === 0 ? 1 : -1) * Math.ceil(i / 2) * 20;
-                    } else if (form === 'line') {
-                        offX = -i * 45; // 単純に i を掛けて、等間隔に後ろへ並べる
-                        offY = 0;       // 一直線なのでYはずらさない
-                    } else {
-                        const a = (Math.PI * 2 / 5) * i;
-                        offX = Math.cos(a) * 40;
-                        offY = Math.sin(a) * 40;
+                    const side = (i % 2 === 0) ? 1 : -1; // 左右交互 (1 or -1)
+                    const step = Math.floor(i / 2) + 1; // 1段目 or 2段目
+
+                    if (pattern === 'V') {
+                        // V型: 後方に広がる (リーダーが先端)
+                        offX = -step * 25;
+                        offY = side * step * 25;
+                    }
+                    else if (pattern === 'W') {
+                        // W型: リーダーを中心にジグザグ配置
+                        offX = (step === 1) ? -25 : 0; // 1段目は後ろ、2段目は真横
+                        offY = side * step * 25;
+                    }
+                    else if (pattern === 'H') {
+                        // H型: 縦に並ぶ二列の中央にリーダー
+                        offX = (step === 1) ? 25 : -25; // 前後に配置
+                        offY = side * 25; // 左右幅は固定
                     }
 
-                    // ★修正ポイント：初期座標はリーダーと同じ(x, y)にする
                     enemies.push({
-                        x: x,
-                        y: y,
-                        vx, vy,
+                        x: x, y: y, vx: vx, vy: vy,
                         hp: 1,
                         speed: ENEMY_SPEEDS.TRIANGLE * spd * stageMag,
                         color: selectedColor,
@@ -2761,10 +2808,9 @@
                         formationType: currentFormationType,
                         angle: initialAngle,
                         drop: 'none',
-                        scale: 0.1, // 出現時は小さく
+                        scale: 0.1,
                         leader: leader,
                         formOffset: { x: offX, y: offY },
-                        // ★出現演出用フラグ
                         isWarping: true,
                         warpPercent: 0,
                         rotX: Math.random() * Math.PI,
@@ -3329,14 +3375,40 @@
         }
 
         function updateTadpoleAI(e) {
-            const dx = player.x - e.x, dy = player.y - e.y, d = Math.hypot(dx, dy) || 0.001;
-            e.vx += (dx / d) * 0.2 * SPEED_SCALE * gameSpeed;
-            e.vy += (dy / d) * 0.2 * SPEED_SCALE * gameSpeed;
-            const cv = Math.hypot(e.vx, e.vy); if (cv > e.speed) { e.vx = (e.vx / cv) * e.speed; e.vy = (e.vy / cv) * e.speed; }
+            const dx = player.x - e.x;
+            const dy = player.y - e.y;
+            const d = Math.hypot(dx, dy) || 0.001;
+
+            // --- 1. 慣性と加速のロジック ---
+            // ターゲットに向かってじわじわと加速を加える（ステアリング）
+            const accel = 0.15 * SPEED_SCALE * gameSpeed;
+            e.vx += (dx / d) * accel;
+            e.vy += (dy / d) * accel;
+
+            // 微弱な摩擦（これがないと加速し続けて制御不能になる）
+            e.vx *= 0.985;
+            e.vy *= 0.985;
+
+            // --- 2. 速度制限 ---
+            const currentV = Math.hypot(e.vx, e.vy);
+            const maxSpd = e.speed; // 生成時に設定されたベーススピード
+            if (currentV > maxSpd) {
+                e.vx = (e.vx / currentV) * maxSpd;
+                e.vy = (e.vy / currentV) * maxSpd;
+            }
+
+            // --- 3. 座標更新 ---
             e.x += e.vx * gameSpeed;
             e.y += e.vy * gameSpeed;
-            e.angle = Math.atan2(dy, dx);
-            e.history.unshift({ x: e.x, y: e.y }); if (e.history.length > 60) e.history.pop();
+
+            // --- 4. 向きの決定（進行方向を向く） ---
+            // 自機の方を向くのではなく、移動ベクトル(vx, vy)の方を向かせることで、
+            // 「行き過ぎて戻る時」のドリフト感を表現します
+            e.angle = Math.atan2(e.vy, e.vx);
+
+            // --- 5. 軌跡の更新 ---
+            e.history.unshift({ x: e.x, y: e.y });
+            if (e.history.length > 60) e.history.pop();
         }
 
         function updateDragonAI(e) {
@@ -4922,6 +4994,7 @@
                 if (p.type === 'laser') { color = '#aff'; char = 'L'; }
                 else if (p.type === 'level') { color = '#0f0'; char = 'W'; }
                 else if (p.type === 'invincible') { color = '#ff0'; char = 'I'; }
+                else if (p.type === 'shield') { color = '#0ff'; char = 'S'; }
 
                 ctx.save();
                 ctx.translate(p.x, p.y);
@@ -4994,27 +5067,70 @@
             ctx.shadowBlur = 10;
             ctx.shadowColor = shipColor;
 
-            // 機体の形状パス
+            // --- ベース機体（全レベル共通） ---
             ctx.beginPath();
             ctx.moveTo(20, 0);
             ctx.lineTo(-10, 10);
             ctx.lineTo(-5, 0);
             ctx.lineTo(-10, -10);
             ctx.closePath();
-
-            // ウィング部分の装飾ライン
-            ctx.moveTo(-5, 0);
-            ctx.lineTo(-15, 15);
-            ctx.moveTo(-5, 0);
-            ctx.lineTo(-15, -15);
-
             ctx.stroke();
+
+            // --- 装飾・進化パーツの追加 ---
+
+            // LV2以上: メインウィングの展開
+            if (p.weaponLevel >= 1) {
+                ctx.beginPath();
+                ctx.moveTo(-5, 5); ctx.lineTo(-18, 15);
+                ctx.moveTo(-5, -5); ctx.lineTo(-18, -15);
+                ctx.stroke();
+            }
+
+            // LV3以上: サイドスラスター/フィン
+            if (p.weaponLevel >= 2) {
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(5, 5); ctx.lineTo(-5, 12);
+                ctx.moveTo(5, -5); ctx.lineTo(-5, -12);
+                ctx.stroke();
+            }
+
+            // LV4以上: 機首の強化（ツインカウル）
+            if (p.weaponLevel >= 3) {
+                ctx.beginPath();
+                ctx.moveTo(10, 3); ctx.lineTo(25, 2);
+                ctx.moveTo(10, -3); ctx.lineTo(25, -2);
+                ctx.stroke();
+            }
+
+            // LV5以上: リアサブウィング
+            if (p.weaponLevel >= 4) {
+                ctx.beginPath();
+                ctx.moveTo(-8, 8); ctx.lineTo(-22, 5);
+                ctx.moveTo(-8, -8); ctx.lineTo(-22, -5);
+                ctx.stroke();
+            }
+
+            // LV6以上: 重装甲化（エネルギーライン）
+            if (p.weaponLevel >= 5) {
+                ctx.save();
+                ctx.strokeStyle = '#fff'; // エネルギーラインは白
+                ctx.lineWidth = 1;
+                ctx.globalAlpha = 0.6;
+                ctx.beginPath();
+                ctx.moveTo(15, 0); ctx.lineTo(-3, 0);
+                ctx.stroke();
+                ctx.restore();
+            }
+
+
+
             ctx.restore();
             ctx.shadowBlur = 0; // シャドウをリセット
 
             // --- 2. サテライト（衛星）の描画 ---
             p.satellites.forEach(s => {
-                ctx.fillStyle = '#0f0';
+                ctx.fillStyle = (p.laserTimer > 0) ? '#0ff' : '#0f0';
                 ctx.beginPath();
                 ctx.arc(s.x, s.y, 3, 0, Math.PI * 2);
                 ctx.fill();
@@ -5101,69 +5217,96 @@
         }
 
         function drawEmeraldPhoenix(ctx, p) {
+
             ctx.save();
             ctx.translate(p.x, p.y);
             ctx.rotate(p.angle);
 
-            // カラー設定：エメラルドグリーンとシアン
-            const wingColor = '#0f8';
-            const highlightColor = '#0ff';
+            // --- 状態に応じた動的なカラー設定 ---
+            let mainColor = '#0f8';    // 通常：エメラルドグリーン
+            let accentColor = '#0ff';  // 通常：シアン
+
+            if (p.invuln > 0) {
+                mainColor = '#ff0';    // 無敵：イエロー
+                accentColor = '#fff';  // 無敵：ホワイト
+            } else if (p.laserTimer > 0) {
+                mainColor = '#0ff';    // レーザー：シアン
+                accentColor = '#fff';  // レーザー：ホワイト
+            }
 
             ctx.shadowBlur = 20;
-            ctx.shadowColor = wingColor;
+            ctx.shadowColor = mainColor;
             ctx.globalCompositeOperation = 'lighter';
 
-            // 1. 揺らめく緑の翼
-            const wingFlap = Math.sin(frame * 0.15) * 15;
+            const scale = G_SCALE * 1.1;
+            const time = frame * 0.15;
+            const flap = Math.sin(time) * 15;
+
+            // 1. 揺らめく翼（メインカラー）
             ctx.lineWidth = 2;
-            ctx.strokeStyle = wingColor;
+            ctx.strokeStyle = mainColor;
 
             for (let side of [-1, 1]) {
                 ctx.beginPath();
                 ctx.moveTo(0, 0);
                 ctx.bezierCurveTo(
-                    -10 * G_SCALE, side * (30 + wingFlap) * G_SCALE,
-                    -40 * G_SCALE, side * (40 + wingFlap) * G_SCALE,
-                    -20 * G_SCALE, side * 5 * G_SCALE
+                    -10 * scale, side * (30 + flap) * scale,
+                    -40 * scale, side * (40 + flap) * scale,
+                    -20 * scale, side * 5 * scale
                 );
                 ctx.stroke();
 
-                // 翼内の水色ハイライト
+                // 翼内のアクセントハイライト
                 ctx.save();
-                ctx.strokeStyle = highlightColor;
+                ctx.strokeStyle = accentColor;
                 ctx.lineWidth = 1;
                 ctx.globalAlpha = 0.4;
                 ctx.beginPath();
-                ctx.moveTo(-5 * G_SCALE, side * 5 * G_SCALE);
-                ctx.lineTo(-25 * G_SCALE, side * (25 + wingFlap) * G_SCALE);
+                ctx.moveTo(-5 * scale, side * 5 * scale);
+                ctx.lineTo(-25 * scale, side * (25 + flap) * scale);
                 ctx.stroke();
                 ctx.restore();
             }
 
-            // 2. 輝く3本の尾羽
+            // 2. 輝く3本の尾羽（真ん中を太く、機体色に同期）
             for (let i = 0; i < 3; i++) {
+                const isCenter = (i === 1);
                 const tailOff = Math.sin(frame * 0.2 + i) * 10;
+
+                ctx.save();
                 ctx.beginPath();
-                ctx.strokeStyle = i === 1 ? highlightColor : wingColor;
-                ctx.lineWidth = 3 - i;
-                ctx.moveTo(-10 * G_SCALE, (i - 1) * 5 * G_SCALE);
+                ctx.strokeStyle = mainColor;
+
+                if (isCenter) {
+                    ctx.lineWidth = 3 * scale; // 真ん中を太く
+                    ctx.shadowBlur = 25;       // 発光を強化
+                } else {
+                    ctx.lineWidth = 1 * scale;
+                    ctx.globalAlpha = 0.6;
+                }
+
+                ctx.moveTo(-10 * scale, (i - 1) * 5 * scale);
                 ctx.quadraticCurveTo(
-                    -40 * G_SCALE, tailOff * G_SCALE,
-                    -60 * G_SCALE, (tailOff + (i - 1) * 10) * G_SCALE
+                    -40 * scale, tailOff * scale,
+                    -70 * scale, (tailOff + (i - 1) * 15) * scale
                 );
                 ctx.stroke();
+                ctx.restore();
             }
 
-            // 3. 頭部の鋭い光（嘴）
-            ctx.fillStyle = '#fff';
+            // --- 3. 頭部デザイン（くちばしの点を削除し、シャープなラインへ） ---
+            ctx.strokeStyle = mainColor;
+            ctx.lineWidth = 2;
             ctx.beginPath();
-            ctx.arc(22 * G_SCALE, 0, 3 * G_SCALE, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.moveTo(0, -4 * scale);
+            ctx.lineTo(25 * scale, 0); // 鋭い先端
+            ctx.lineTo(0, 4 * scale);
+            ctx.stroke();
 
             ctx.restore();
             ctx.globalCompositeOperation = 'source-over';
 
-            // 4. 羽毛パーティクルの生成
+            // 4. 羽毛パーティクルの生成（色を同期）
             if (frame % 2 === 0) {
                 const pAngle = p.angle + Math.PI + (Math.random() - 0.5);
                 const pSpeed = 2 + Math.random() * 4;
@@ -5172,8 +5315,8 @@
                     y: p.y,
                     vx: Math.cos(pAngle) * pSpeed,
                     vy: Math.sin(pAngle) * pSpeed,
-                    color: Math.random() > 0.5 ? wingColor : highlightColor,
-                    life: 0.6,
+                    color: Math.random() > 0.5 ? mainColor : accentColor,
+                    life: 1,
                     size: 2 + Math.random() * 2
                 });
             }
@@ -5321,60 +5464,48 @@
         }
 
         function drawTriangleEnemy(ctx, e) {
-            // セーフガード: 万が一数値が異常な場合は描画をスキップ
             if (!e || typeof e.x !== 'number' || isNaN(e.x)) return;
 
             ctx.save();
 
-            // --- 1. 座標とスケールの設定 ---
+            // --- 1. 座標と進行方向への回転 ---
             ctx.translate(e.x, e.y);
+            ctx.rotate(e.angle);
 
-            // 出現完了後は e.scale (0.7) に固定、出現中は 0.1 ～ 0.7 へ変化
-            const currentScale = (e.scale || 0.7) * G_SCALE;
+            const currentScale = (e.scale || 0.7) * G_SCALE * 1.2;
             ctx.scale(currentScale, currentScale);
 
-            // --- 2. 出現演出用の透明度とグロー設定 ---
-            // Warping中のみ warpPercent に依存させ、それ以外は不透明(1.0)にする
+            // --- 2. 描画設定 ---
             const visualAlpha = e.isWarping ? (e.warpPercent || 0) : 1.0;
             ctx.globalAlpha = visualAlpha;
-
-            // --- 3. ネオンカラー設定 ---
             ctx.globalCompositeOperation = 'lighter';
-            ctx.strokeStyle = e.color || '#0ff';
-            ctx.lineWidth = 3.5;
 
-            // グロー効果（出現中は控えめから徐々に強く）
-            ctx.shadowBlur = e.isWarping ? (5 + visualAlpha * 20) : 25;
-            ctx.shadowColor = e.color || '#0ff';
-
-            // --- 4. 3D形状（正四面体：テトラヒドロン）の計算 ---
-            const size = 15;
+            // --- 3. 3D形状（縦長の正八面体） ---
+            const size = 12;
             const pts = [
-                { x: 1, y: 1, z: 1 },
-                { x: -1, y: -1, z: 1 },
-                { x: -1, y: 1, z: -1 },
-                { x: 1, y: -1, z: -1 }
+                { x: 3.5, y: 0, z: 0 },  // 前頂点（縦長）
+                { x: -1.2, y: 0, z: 0 },  // 後頂点
+                { x: 0, y: 1, z: 1 }, { x: 0, y: -1, z: 1 },
+                { x: 0, y: -1, z: -1 }, { x: 0, y: 1, z: -1 }
             ];
 
-            // 回転速度の適用（e.rotX 等が更新されている前提）
-            const cosX = Math.cos(e.rotX || 0), sinX = Math.sin(e.rotX || 0);
-            const cosY = Math.cos(e.rotY || 0), sinY = Math.sin(e.rotY || 0);
-            const cosZ = Math.cos(e.rotZ || 0), sinZ = Math.sin(e.rotZ || 0);
-
+            // --- 4. 自転計算 ---
+            const cosR = Math.cos(e.rotX || 0);
+            const sinR = Math.sin(e.rotX || 0);
             const proj = pts.map(p => {
-                // 3D回転行列計算
-                let y1 = p.y * cosX - p.z * sinX;
-                let z1 = p.y * sinX + p.z * cosX;
-                let x2 = p.x * cosY + z1 * sinY;
-                let z2 = -p.x * sinY + z1 * cosY;
-                let x3 = x2 * cosZ - y1 * sinZ;
-                let y3 = x2 * sinZ + y1 * cosZ;
-                return { x: x3 * size, y: y3 * size };
+                let ny = p.y * cosR - p.z * sinR;
+                return { x: p.x * size, y: ny * size };
             });
 
-            const lines = [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]];
+            const lines = [
+                [0, 2], [0, 3], [0, 4], [0, 5],
+                [1, 2], [1, 3], [1, 4], [1, 5],
+                [2, 3], [3, 4], [4, 5], [5, 2]
+            ];
 
-            // 外殻ワイヤーフレームの描画
+            // --- 5. ワイヤーフレーム ---
+            ctx.strokeStyle = e.color || '#0ff';
+            ctx.lineWidth = 2;
             ctx.beginPath();
             lines.forEach(l => {
                 ctx.moveTo(proj[l[0]].x, proj[l[0]].y);
@@ -5382,22 +5513,33 @@
             });
             ctx.stroke();
 
-            // --- 5. 中心の白いコア ---
-            // コア自体に個別の透明度設定を上書きしないよう、save/restore内で計算
-            ctx.save();
-            // コアは本体よりも少しだけ明るく強調
-            ctx.shadowBlur = 15;
-            ctx.shadowColor = "#fff";
-            ctx.fillStyle = "#fff";
-            // globalAlphaは親（visualAlpha）を引き継ぐ
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            // --- 6. 点滅する熱源コア ---
+            // フレーム数から0.8〜1.2の範囲で揺らぎを作る
+            const pulse = 0.8 + Math.sin(frame * 0.15) * 0.2;
+
+            // レイヤー1：赤（外側）
+            ctx.fillStyle = '#f00';
             ctx.beginPath();
-            ctx.arc(0, 0, 3, 0, Math.PI * 2);
+            ctx.arc(0, 0, 7.5 * pulse, 0, Math.PI * 2);
             ctx.fill();
-            ctx.restore();
+
+            // レイヤー2：橙（中間）
+            ctx.fillStyle = '#f90';
+            ctx.beginPath();
+            ctx.arc(0, 0, 5 * pulse, 0, Math.PI * 2);
+            ctx.fill();
+
+            // レイヤー3：白（中心）
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(0, 0, 2.5, 0, Math.PI * 2); // 中心は安定させるため固定
+            ctx.fill();
 
             ctx.restore();
-
-            // globalCompositeOperationを元に戻す（重要）
             ctx.globalCompositeOperation = 'source-over';
         }
 
@@ -6339,7 +6481,7 @@
             const bulletColor = (Math.floor(frame / 5) % 2 === 0) ? '#ff0000' : '#ff8800';
             const size = 7 * G_SCALE;
 
- 
+
             ctx.fillStyle = bulletColor;
 
             ctx.beginPath();
@@ -6832,6 +6974,7 @@
         });
         window.addEventListener('keyup', e => input.keys[e.code] = false);
         window.addEventListener('resize', resize);
+
 
         let isInit = false;
         const handleInteraction = () => {
